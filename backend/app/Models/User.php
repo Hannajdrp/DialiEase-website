@@ -6,14 +6,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
     protected $primaryKey = 'userID';
-    protected $keyType = 'int'; // Changed from string to int
-    public $incrementing = true; // Changed from false to true
+    protected $keyType = 'int';
+    public $incrementing = true;
 
     protected $fillable = [
         'userID',
@@ -45,23 +46,23 @@ class User extends Authenticatable
         'reset_token',
     ];
 
-    public function patient()
+    public function patient(): HasOne
     {
         return $this->hasOne(Patient::class, 'userID', 'userID');
     }
 
-    public function isAdmin()
+    public function isAdmin(): bool
     {
-        return $this->userLevel === 'admin';
+        return strtolower($this->userLevel ?? '') === 'admin';
     }
 
-    public function empStatus()
+    public function empStatus(): HasOne
     {
         return $this->hasOne(EmpStatus::class, 'userID', 'userID');
     }
 
-    public function getFullNameAttribute()
+    public function getFullNameAttribute(): string
     {
-        return trim("{$this->first_name} {$this->last_name}");
+        return trim($this->first_name . ' ' . $this->last_name);
     }
 }

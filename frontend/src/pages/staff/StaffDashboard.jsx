@@ -594,11 +594,16 @@ const StaffDashboard = () => {
                   </div>
                 </div>
               </div>
+             
               <img src={staffPic} alt="staff" style={{
-                width: '190px',
-                height: '200px',
+                width: '350px',  // Increased from original
+                height: '350px', // Increased from original
                 objectFit: 'contain',
-                zIndex: 1
+                zIndex: 1,
+                position: 'absolute', // Changed to absolute positioning
+                right: '20px',       // Positioned from right
+                top: '50%',          // Centered vertically
+                transform: 'translateY(-50%)' // Perfect vertical centering
               }} />
               <div style={{
                 position: 'absolute',
@@ -707,27 +712,27 @@ const StaffDashboard = () => {
 
                       
             <PatientSections 
-              dashboardData={dashboardData}
-              stats={stats}
-              activeTab={activeTab}
-              setActiveTab={setActiveTab}
-              todaySearchTerm={todaySearchTerm}
-              setTodaySearchTerm={setTodaySearchTerm}
-              tomorrowSearchTerm={tomorrowSearchTerm}
-              setTomorrowSearchTerm={setTomorrowSearchTerm}
-              nextWeekSearchTerm={nextWeekSearchTerm}
-              setNextWeekSearchTerm={setNextWeekSearchTerm}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              timeRange={timeRange}
-              setTimeRange={setTimeRange}
-              handleMarkAsCompleted={handleMarkAsCompleted}
-              handleApproveReschedule={handleApproveReschedule}
-              calculateAge={calculateAge}
-              formatDate={formatDate}
-              navigate={navigate}
-              fetchDashboardData={fetchDashboardData}
-            />
+            dashboardData={dashboardData}
+            stats={stats}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            todaySearchTerm={todaySearchTerm}
+            setTodaySearchTerm={setTodaySearchTerm}
+            tomorrowSearchTerm={tomorrowSearchTerm}
+            setTomorrowSearchTerm={setTomorrowSearchTerm}
+            nextWeekSearchTerm={nextWeekSearchTerm}
+            setNextWeekSearchTerm={setNextWeekSearchTerm}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            timeRange={timeRange}
+            setTimeRange={setTimeRange}
+            handleMarkAsCompleted={handleMarkAsCompleted}
+            handleApproveReschedule={handleApproveReschedule}
+            calculateAge={calculateAge}
+            formatDate={formatDate}
+            navigate={navigate}
+            fetchDashboardData={fetchDashboardData}
+          />
           </div>
 
           <div style={{
@@ -744,7 +749,7 @@ const StaffDashboard = () => {
             rescheduledCount={stats.rescheduled}
             missedCount={dashboardData.counts.unrescheduled}
             yesterdayMissedCount={dashboardData.counts.yesterday_unrescheduled}
-            fetchDashboardData={fetchDashboardData} // Add this prop
+            fetchDashboardData={fetchDashboardData}
           />
 
             <div style={{

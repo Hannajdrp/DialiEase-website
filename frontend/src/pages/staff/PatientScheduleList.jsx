@@ -16,7 +16,6 @@ import {
   Tabs,
   Tab,
   Box,
-  CircularProgress,
   Alert,
   Chip,
   Grid,
@@ -77,7 +76,6 @@ const groupSchedulesByDate = (schedules) => {
 };
 
 const PatientScheduleList = () => {
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [schedules, setSchedules] = useState([]);
   const [upcomingSchedules, setUpcomingSchedules] = useState([]);
@@ -88,7 +86,7 @@ const PatientScheduleList = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const [currentPage, setCurrentPage] = useState(1);
-  const [patientsPerPage] = useState(5);
+  const [patientsPerPage] = useState(3);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'appointment_date', direction: 'desc' });
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -127,8 +125,6 @@ const PatientScheduleList = () => {
 
   const fetchSchedules = async () => {
     try {
-      setLoading(true);
-      
       const authToken = localStorage.getItem('token') || sessionStorage.getItem('token');
       
       const headers = {
@@ -148,10 +144,8 @@ const PatientScheduleList = () => {
       const completedResponse = await axios.get('/patient-schedules/completed', { headers });
       setCompletedSchedules(completedResponse.data.data);
 
-      setLoading(false);
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch schedules');
-      setLoading(false);
     }
   };
 
@@ -383,7 +377,7 @@ const PatientScheduleList = () => {
       position: 'relative',
       width: '100vw',
       overflowX: 'hidden',
-      marginTop: isMobile ? '0' : '-680px',
+      marginTop: isMobile ? '0' : '-920px',
     },
     content: {
       flex: 1,
@@ -936,11 +930,7 @@ const PatientScheduleList = () => {
             </div>
           </div>
 
-          {loading ? (
-            <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-              <CircularProgress style={{ color: '#395886' }} />
-            </Box>
-          ) : error ? (
+          {error ? (
             <Alert severity="error">{error}</Alert>
           ) : currentPatients.length === 0 ? (
             <div style={styles.noResults}>

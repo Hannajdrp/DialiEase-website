@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Reminder;
 use App\Models\User;
 use App\Models\Patient;
-use App\Models\Treatment;
+use App\Models\Schedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -20,8 +20,8 @@ class AdminDashboardController extends Controller
             $doctorCount = User::where('userLevel', 'doctor')->count();
             $nurseCount = User::where('userLevel', 'nurse')->count();
             $patientCount = Patient::count();
-            $appointmentCount = DB::table('schedules')
-                ->where('confirmation_status', 'confirmed')
+            
+            $appointmentCount = Schedule::where('confirmation_status', 'confirmed')
                 ->count();
 
             return response()->json([
@@ -35,6 +35,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Dashboard stats error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch dashboard stats',
@@ -47,23 +48,20 @@ class AdminDashboardController extends Controller
     public function getAppointmentCounts()
     {
         try {
-            $today = Carbon::today()->toDateString();
-            $tomorrow = Carbon::tomorrow()->toDateString();
-            $nextThreeDaysStart = Carbon::today()->addDays(2)->toDateString();
-            $nextThreeDaysEnd = Carbon::today()->addDays(4)->toDateString();
+            $today = Carbon::today()->format('Y-m-d');
+            $tomorrow = Carbon::tomorrow()->format('Y-m-d');
+            $nextThreeDaysStart = Carbon::today()->addDays(2)->format('Y-m-d');
+            $nextThreeDaysEnd = Carbon::today()->addDays(4)->format('Y-m-d');
 
-            $todayCount = DB::table('schedules')
-                ->whereDate('appointment_date', $today)
+            $todayCount = Schedule::whereDate('appointment_date', $today)
                 ->where('confirmation_status', 'confirmed')
                 ->count();
 
-            $tomorrowCount = DB::table('schedules')
-                ->whereDate('appointment_date', $tomorrow)
+            $tomorrowCount = Schedule::whereDate('appointment_date', $tomorrow)
                 ->where('confirmation_status', 'confirmed')
                 ->count();
 
-            $nextThreeDaysCount = DB::table('schedules')
-                ->whereBetween(DB::raw('DATE(appointment_date)'), [$nextThreeDaysStart, $nextThreeDaysEnd])
+            $nextThreeDaysCount = Schedule::whereBetween('appointment_date', [$nextThreeDaysStart, $nextThreeDaysEnd])
                 ->where('confirmation_status', 'confirmed')
                 ->count();
 
@@ -77,6 +75,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Appointment counts error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch appointment counts',
@@ -95,7 +94,7 @@ class AdminDashboardController extends Controller
                     return [
                         'id' => $reminder->id,
                         'text' => $reminder->text,
-                        'date' => $reminder->date->format('Y-m-d'),
+                        'date' => $reminder->date ? $reminder->date->format('Y-m-d') : null,
                         'completed' => (bool)$reminder->completed,
                         'created_at' => $reminder->created_at->format('Y-m-d H:i:s')
                     ];
@@ -107,6 +106,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Get reminders error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch reminders',
@@ -135,7 +135,8 @@ class AdminDashboardController extends Controller
             $reminder = Reminder::create([
                 'text' => $request->text,
                 'date' => $request->date,
-                'completed' => $request->completed ?? false
+                'completed' => $request->completed ?? false,
+                'user_id' => auth()->id() // Add user association if needed
             ]);
 
             return response()->json([
@@ -145,6 +146,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Add reminder error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to add reminder',
@@ -180,6 +182,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Update reminder error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update reminder',
@@ -200,6 +203,7 @@ class AdminDashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Delete reminder error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to delete reminder',
@@ -207,4 +211,68 @@ class AdminDashboardController extends Controller
             ], 500);
         }
     }
+
+    // Add this method to your AdminDashboardController
+public function getAgeDistribution()
+{
+    try {
+        // Get current date for age calculation
+        $currentDate = Carbon::now();
+        
+        // Calculate age distribution
+        $ageDistribution = Patient::select(
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, ?) BETWEEN 0 AND 17 THEN 1 END) as minors'),
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, ?) BETWEEN 18 AND 59 THEN 1 END) as adults'),
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, ?) >= 60 THEN 1 END) as seniors')
+        )
+        ->setBindings([$currentDate, $currentDate, $currentDate])
+        ->first();
+
+        // Get monthly distribution
+        $monthlyDistribution = Patient::select(
+            DB::raw('MONTH(created_at) as month'),
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, created_at) BETWEEN 0 AND 17 THEN 1 END) as minors'),
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, created_at) BETWEEN 18 AND 59 THEN 1 END) as adults'),
+            DB::raw('COUNT(CASE WHEN TIMESTAMPDIFF(YEAR, date_of_birth, created_at) >= 60 THEN 1 END) as seniors')
+        )
+        ->whereYear('created_at', $currentDate->year)
+        ->groupBy('month')
+        ->orderBy('month')
+        ->get();
+
+        // Format monthly data for chart
+        $monthlyData = [
+            'minors' => array_fill(0, 12, 0),
+            'adults' => array_fill(0, 12, 0),
+            'seniors' => array_fill(0, 12, 0)
+        ];
+
+        foreach ($monthlyDistribution as $monthData) {
+            $monthIndex = $monthData->month - 1;
+            $monthlyData['minors'][$monthIndex] = $monthData->minors;
+            $monthlyData['adults'][$monthIndex] = $monthData->adults;
+            $monthlyData['seniors'][$monthIndex] = $monthData->seniors;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'total' => [
+                    'minors' => $ageDistribution->minors,
+                    'adults' => $ageDistribution->adults,
+                    'seniors' => $ageDistribution->seniors,
+                ],
+                'monthly' => $monthlyData
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+        \Log::error('Age distribution error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to fetch age distribution',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
 }

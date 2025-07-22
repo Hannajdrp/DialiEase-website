@@ -16,17 +16,17 @@ import {
   FaFileMedical,
   FaClinicMedical,
   FaRegClock,
-  FaChartLine,
   FaBars
 } from 'react-icons/fa';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import AdminSidebar from './AdminSidebar';
+import AdminMetrics from './AdminMetrics';
 import Notification from '../../components/Notification';
 import Calendar from "../../components/Calendar/calendar";
 import adminPic from "../../assets/images/adminPic.png";
+import AgeDistributionChart from './AgeDistributionChart';
 
 // Register ChartJS components
 ChartJS.register(
@@ -57,7 +57,6 @@ const AdminDashboard = () => {
   useEffect(() => {
     const handleResize = () => {
       setWindowWidth(window.innerWidth);
-      // Close sidebar if window is resized to larger than 768px
       if (window.innerWidth > 768) {
         setSidebarOpen(false);
       }
@@ -129,16 +128,22 @@ const AdminDashboard = () => {
 
       if (response.data.success) {
         setDashboardStats(response.data.data);
+      } else {
+        showNotification(response.data.message || 'Failed to load dashboard statistics', 'error');
       }
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
-      showNotification('Failed to load dashboard statistics', 'error');
+      const errorMsg = error.response?.data?.message || 
+                      error.message || 
+                      'Failed to load dashboard statistics';
+      showNotification(errorMsg, 'error');
     } finally {
       setLoadingStats(false);
     }
   };
 
   const fetchAppointmentCounts = async () => {
+    setLoadingStats(true);
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get('http://localhost:8000/api/admin/appointment-counts', {
@@ -150,10 +155,17 @@ const AdminDashboard = () => {
 
       if (response.data.success) {
         setAppointmentCounts(response.data.data);
+      } else {
+        showNotification(response.data.message || 'Failed to load appointment counts', 'error');
       }
     } catch (error) {
       console.error('Error fetching appointment counts:', error);
-      showNotification('Failed to load appointment counts', 'error');
+      const errorMsg = error.response?.data?.message || 
+                      error.message || 
+                      'Failed to load appointment counts';
+      showNotification(errorMsg, 'error');
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -289,6 +301,7 @@ const AdminDashboard = () => {
         alignItems: 'center',
         height: '100vh',
         backgroundColor: '#f8f9fa',
+      
       }}>
         <div style={{
           textAlign: 'center',
@@ -315,34 +328,6 @@ const AdminDashboard = () => {
 
   const userInitials = user ? `${user.first_name?.charAt(0) || ''}${user.last_name?.charAt(0) || ''}` : '';
 
-  // Age distribution chart data
-  const ageDistributionData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Minors (0-17)',
-        data: [5, 8, 6, 9, 7, 10],
-        borderColor: 'rgb(75, 192, 192)',
-        backgroundColor: 'rgba(75, 192, 192, 0.5)',
-        tension: 0.1
-      },
-      {
-        label: 'Adults (18-59)',
-        data: [20, 25, 22, 30, 28, 35],
-        borderColor: 'rgb(53, 162, 235)',
-        backgroundColor: 'rgba(53, 162, 235, 0.5)',
-        tension: 0.1
-      },
-      {
-        label: 'Seniors (60+)',
-        data: [8, 10, 12, 15, 14, 18],
-        borderColor: 'rgb(255, 99, 132)',
-        backgroundColor: 'rgba(255, 99, 132, 0.5)',
-        tension: 0.1
-      }
-    ]
-  };
-
   return (
     <div style={{
       display: 'flex',
@@ -354,7 +339,11 @@ const AdminDashboard = () => {
       color: '#2c3e50',
       minHeight: '100vh',
       position: 'relative',
-      marginTop: '-670px'
+      marginTop: '-680px',
+      width: '99%',
+      marginRight:'40px',
+    
+      
     }}>
       {/* Mobile Sidebar Toggle Button */}
       {windowWidth <= 768 && (
@@ -598,201 +587,17 @@ const AdminDashboard = () => {
           />
         </div>
 
-        {/* Key Metrics Section */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: windowWidth <= 768 ? '1fr' : windowWidth <= 1024 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-          gap: '1rem',
-          marginBottom: '1.5rem'
-        }}>
-          <div style={{
-            background: '#ffffff',
-            borderRadius: '12px',
-            padding: '1.25rem',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem'
-          }}>
-            <div style={{
-              width: '50px',
-              height: '50px',
-              borderRadius: '12px',
-              background: '#e3f2fd',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem',
-              color: '#1976d2',
-              flexShrink: 0
-            }}>
-              <FaUsers />
-            </div>
-            <div>
-              <div style={{
-                color: '#7f8c8d',
-                fontSize: '0.85rem',
-                marginBottom: '0.25rem'
-              }}>CAPD Employees</div>
-              <div style={{
-                color: '#2c3e50',
-                fontSize: '1.5rem',
-                fontWeight: '600'
-              }}>{loadingStats ? '...' : (dashboardStats?.doctorCount || 0) + (dashboardStats?.nurseCount || 0)}</div>
-            </div>
-          </div>
-
-          <div style={{
-            background: '#ffffff',
-            borderRadius: '12px',
-            padding: '1.25rem',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem'
-          }}>
-            <div style={{
-              width: '50px',
-              height: '50px',
-              borderRadius: '12px',
-              background: '#fee2e2',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1.5rem',
-              color: '#d32f2f',
-              flexShrink: 0
-            }}>
-              <FaUserInjured />
-            </div>
-            <div>
-              <div style={{
-                color: '#7f8c8d',
-                fontSize: '0.85rem',
-                marginBottom: '0.25rem'
-              }}>Patients</div>
-              <div style={{
-                color: '#2c3e50',
-                fontSize: '1.5rem',
-                fontWeight: '600'
-              }}>{loadingStats ? '...' : dashboardStats?.patientCount || 0}</div>
-            </div>
-          </div>
-
-          <div style={{
-            background: '#ffffff',
-            borderRadius: '12px',
-            padding: '1.25rem',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.5rem'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem'
-            }}>
-              <div style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '12px',
-                background: '#fff8e1',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.5rem',
-                color: '#ffa000',
-                flexShrink: 0
-              }}>
-                <FaCalendarCheck />
-              </div>
-              <div>
-                <div style={{
-                  color: '#7f8c8d',
-                  fontSize: '0.85rem',
-                  marginBottom: '0.25rem'
-                }}>Confirmed Appointments</div>
-                <div style={{
-                  color: '#2c3e50',
-                  fontSize: '1.5rem',
-                  fontWeight: '600'
-                }}>{loadingStats ? '...' : dashboardStats?.appointmentCount || 0}</div>
-              </div>
-            </div>
-            
-            {appointmentCounts && (
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: '0.75rem',
-                color: '#6b7280',
-                marginTop: '0.5rem'
-              }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontWeight: '600' }}>Today</div>
-                  <div>{appointmentCounts.today}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontWeight: '600' }}>Tomorrow</div>
-                  <div>{appointmentCounts.tomorrow}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontWeight: '600' }}>Next 3 Days</div>
-                  <div>{appointmentCounts.nextThreeDays}</div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
+        <AdminMetrics 
+          dashboardStats={dashboardStats} 
+          appointmentCounts={appointmentCounts} 
+          loadingStats={loadingStats} 
+        />
+          
         {/* Age Distribution Chart */}
-        <div style={{
-          background: '#ffffff',
-          borderRadius: '16px',
-          padding: '1.5rem',
-          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-          marginBottom: '1.5rem'
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '1.5rem'
-          }}>
-            <h3 style={{
-              color: '#395886',
-              fontSize: '1rem',
-              margin: 0,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontWeight: '600'
-            }}>
-              <FaChartLine style={{ color: '#477977', fontSize: '0.9rem' }} />
-              Patient Age Distribution
-            </h3>
-          </div>
-          <div style={{ height: '300px' }}>
-            <Line 
-              data={ageDistributionData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: {
-                    position: windowWidth <= 768 ? 'bottom' : 'top'
-                  }
-                },
-                scales: {
-                  y: {
-                    beginAtZero: true
-                  }
-                }
-              }}
-            />
-          </div>
-        </div>
+        <AgeDistributionChart 
+          dashboardStats={dashboardStats} 
+          windowWidth={windowWidth} 
+        />
       </main>
       
       {/* Right Sidebar - Conditionally rendered based on screen size */}
@@ -1060,7 +865,7 @@ const AdminDashboard = () => {
               </button>
 
               <button
-                onClick={() => navigate('/admin/HCproviderAddModal')}
+                onClick={() => navigate('/admin/PatientList')}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
@@ -1095,7 +900,7 @@ const AdminDashboard = () => {
                   fontSize: '0.75rem',
                   fontWeight: '500',
                   color: '#047857'
-                }}>Add Employee</span>
+                }}>CAPD Patient List</span>
               </button>
             </div>
           </div>

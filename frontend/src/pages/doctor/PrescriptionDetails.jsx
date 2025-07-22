@@ -7,6 +7,7 @@ import {
 } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
+import Spinner from '../../components/Spinner';
 import ShowPrescribeModal from './ShowPrescribeModal';
 
 const DetailsContainer = styled.div`
@@ -67,8 +68,8 @@ const PatientInfoCard = styled.div`
 
 const InfoItem = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+  flexDirection: 'column',
+  gap: '0.2rem'
 `;
 
 const InfoLabel = styled.span`
@@ -513,11 +514,8 @@ const commonPresets = [
 const PrescriptionDetails = ({ 
   selectedMedicines, 
   onUpdateMedicine,
-  onRemoveMedicine,
   prescriptionDetails,
-  setPrescriptionDetails,
-  patientId,
-  onSaveSuccess
+  setPrescriptionDetails
 }) => {
   const [dropdowns, setDropdowns] = useState({
     dosage: {},
@@ -614,7 +612,7 @@ const PrescriptionDetails = ({
   const validateForm = () => {
     const newErrors = {};
 
-    // Validate medicines
+    // Validate medicines - all fields required
     selectedMedicines.forEach((med, index) => {
       if (!med.dosage) {
         newErrors[`medicine-${index}-dosage`] = 'Dosage is required';
@@ -627,14 +625,25 @@ const PrescriptionDetails = ({
       }
     });
 
-    // Validate PD data if any fields are filled
-    const hasPdData = pdData.first || pdData.second || pdData.third || pdData.bags.length > 0;
+    // Validate additional instructions
+    if (!prescriptionDetails.additionalInstructions) {
+      newErrors['additionalInstructions'] = 'Additional instructions are required';
+    }
+
+    // Validate PD data - all fields required except 4th, 5th, 6th exchanges
+    const hasPdData = pdData.first || pdData.second || pdData.third || 
+                     pdData.fourth || pdData.fifth || pdData.sixth || 
+                     pdData.bags.length > 0;
+    
     if (hasPdData) {
+      if (!pdData.system) {
+        newErrors['system'] = 'PD System is required';
+      }
       if (!pdData.totalExchanges) {
-        newErrors['totalExchanges'] = 'Total exchanges is required for PD';
+        newErrors['totalExchanges'] = 'Total exchanges is required';
       }
       if (!pdData.dwellTime) {
-        newErrors['dwellTime'] = 'Dwell time is required for PD';
+        newErrors['dwellTime'] = 'Dwell time is required';
       }
       if (!pdData.first) {
         newErrors['first'] = '1st exchange is required';
@@ -658,43 +667,11 @@ const PrescriptionDetails = ({
     }
     
     if (!validateForm()) {
-      toast.error('Please fix all errors before submitting');
+      toast.error('Please fill in all required fields before submitting');
       return;
     }
     
     setShowPreviewModal(true);
-  };
-
-  const handleSavePrescription = async () => {
-    setIsSaving(true);
-    setSuccess(false);
-    
-    try {
-      const response = await api.post('/prescriptions/generate', {
-        patient_id: patientId,
-        medicines: selectedMedicines.map(med => ({
-          name: med.name,
-          dosage: med.dosage,
-          frequency: med.frequency,
-          duration: med.duration
-        })),
-        additional_instructions: prescriptionDetails.additionalInstructions,
-        pd_data: pdData.bags.length > 0 ? pdData : null
-      });
-
-      if (response.data.success) {
-        setSuccess(true);
-        if (onSaveSuccess) onSaveSuccess();
-        toast.success('Prescription saved successfully!');
-      } else {
-        throw new Error(response.data.message || 'Failed to save prescription');
-      }
-    } catch (error) {
-      console.error('Error saving prescription:', error);
-      toast.error(`Error: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   return (
@@ -759,7 +736,7 @@ const PrescriptionDetails = ({
                   <RemoveButton 
                     onClick={(e) => {
                       e.stopPropagation();
-                      onRemoveMedicine(medicine.id);
+                      onUpdateMedicine(medicine.id, 'remove');
                     }}
                     aria-label={`Remove ${medicine.name}`}
                   >
@@ -1042,13 +1019,13 @@ const PrescriptionDetails = ({
           </tbody>
         </PdTable>
         
-        <InputLabel>Bags (count required)</InputLabel>
+        <InputLabel>PD Solution</InputLabel>
         <BagInputContainer>
           <BagInput
             type="number"
             value={newBag.percentage}
             onChange={(e) => setNewBag({ ...newBag, percentage: e.target.value })}
-            placeholder="Percentage (optional)"
+            placeholder="Bag Percentage"
             min="0"
             step="0.1"
           />
@@ -1056,7 +1033,7 @@ const PrescriptionDetails = ({
             type="number"
             value={newBag.count}
             onChange={(e) => setNewBag({ ...newBag, count: e.target.value })}
-            placeholder="Count *"
+            placeholder="Number of Bags"
             min="1"
             required
           />
@@ -1123,22 +1100,20 @@ const PrescriptionDetails = ({
         )}
       </Section>
 
-      {showPreviewModal && (
-        <ShowPrescribeModal
-          isOpen={showPreviewModal}
-          onClose={(shouldSave) => {
-            setShowPreviewModal(false);
-            if (shouldSave) {
-              handleSavePrescription();
-            }
-          }}
-          patientId={patientId}
-          patientName={prescriptionDetails.patientName}
-          medicines={selectedMedicines}
-          pdData={pdData}
-          additionalInstructions={prescriptionDetails.additionalInstructions}
-        />
-      )}
+      <ShowPrescribeModal
+        isOpen={showPreviewModal}
+        onClose={(shouldSave) => {
+          setShowPreviewModal(false);
+          if (shouldSave) {
+            setSuccess(true);
+          }
+        }}
+        patientName={prescriptionDetails.patientName}
+        patientHospitalNumber={prescriptionDetails.hospitalNumber}
+        medicines={selectedMedicines}
+        pdData={pdData}
+        additionalInstructions={prescriptionDetails.additionalInstructions}
+      />
     </DetailsContainer>
   );
 };

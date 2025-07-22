@@ -32,6 +32,7 @@
     "react-select": "^5.10.1",
     "react-signature-pad-wrapper": "^4.1.0",
     "react-toastify": "^11.0.5",
+    "react-tooltip": "^5.29.1",
     "styled-components": "^6.1.19",
     "tailwindcss": "^4.1.11",
     "uuid": "^11.1.0",

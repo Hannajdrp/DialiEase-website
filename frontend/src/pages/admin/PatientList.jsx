@@ -348,8 +348,8 @@ const PatientList = () => {
       backgroundColor: '#f5f7fa',
       position: 'relative',
       marginTop: '-910px',
-      width: '110%',
-      marginRight: '100px',
+      width: '127%',
+      marginLeft: isMobile ? '0' : '-170px',
     },
     content: {
       flex: 1,
@@ -919,14 +919,14 @@ const PatientList = () => {
                       />
                       <div style={styles.userDetails}>
                         <span style={styles.welcomeText}>Good Day, {user.first_name}!</span>
-                        <span style={styles.userRole}>Admin</span>
+                        <span style={styles.userRole}>Administrator</span>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
               <div style={styles.headerTitle}>
-                <p style={styles.subHeading}>Comprehensive patient management portal</p>
+                <p style={styles.subHeading}>A complete and easy-to-use system for managing all patient records, appointments, and care in one place.</p>
                 <p style={styles.datetime}>
                   {new Date().toLocaleString('en-US', {
                     weekday: 'long',

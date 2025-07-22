@@ -298,9 +298,9 @@ const HCProviderList = () => {
       minHeight: '100vh',
       backgroundColor: '#f5f7fa',
       position: 'relative',
-      width: '110%',
-      marginLeft: isMobile ? '0' : '10px',
-      marginTop: isMobile ? '0' : '-910px',
+      marginTop: '-910px',
+      width: '120%',
+      marginLeft: isMobile ? '0' : '-130px',
     },
     content: {
       flex: 1,
@@ -913,25 +913,14 @@ const HCProviderList = () => {
                       />
                       <div style={styles.userDetails}>
                         <span style={styles.welcomeText}>Welcome, {user.first_name}!</span>
-                        <span style={styles.userRole}>Admin</span>
+                        <span style={styles.userRole}>Administrator</span>
                       </div>
-                      <button 
-                        style={styles.notificationButton}
-                        onClick={() => setShowActivityPanel(!showActivityPanel)}
-                      >
-                        <FaBell />
-                        {recentActivities.length > 0 && (
-                          <span style={styles.notificationBadge}>
-                            {recentActivities.length > 9 ? '9+' : recentActivities.length}
-                          </span>
-                        )}
-                      </button>
                     </div>
                   )}
                 </div>
               </div>
               <div style={styles.headerTitle}>
-                <p style={styles.subHeading}>Manage healthcare providers and staff</p>
+                <p style={styles.subHeading}>Keep an updated list of doctors, nurses, and staff, with an option to add new team members anytime</p>
                 <p style={styles.datetime}>
                   {new Date().toLocaleString('en-US', {
                     weekday: 'long',
@@ -1161,14 +1150,7 @@ const HCProviderList = () => {
                             >
                               <FaEnvelope />
                             </button>
-                            <button 
-                              style={{ ...styles.quickAction, ...(!provider.phone_number ? styles.quickActionDisabled : {}) }}
-                              onClick={() => handleCall(provider.phone_number)}
-                              disabled={!provider.phone_number}
-                              title="Call"
-                            >
-                              <FaPhone />
-                            </button>
+        
                           </div>
                         </div>
                       </td>

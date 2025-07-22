@@ -63,9 +63,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
 
-Route::middleware('auth:sanctum')->group(function() {
-    Route::post('/prescriptions/generate', [SavePrescriptionController::class, 'store']);
-    Route::get('/prescriptions/{patient}', [SavePrescriptionController::class, 'show']);
+Route::middleware('auth:api')->group(function() {
+    Route::post('/prescriptions/generate', [SavePrescriptionController::class, 'generatePrescription']);
+    Route::post('/prescriptions/generate-pdf', [SavePrescriptionController::class, 'generatePdf']);
 });
 
 

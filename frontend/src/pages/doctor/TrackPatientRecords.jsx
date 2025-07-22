@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -11,16 +11,16 @@ import {
   FiCheckCircle,
   FiXCircle,
   FiBarChart2,
-  FiChevronDown,
-  FiChevronUp,
   FiSearch,
   FiThermometer,
   FiDroplet,
-  FiUser
+  FiUser,
+  FiX
 } from 'react-icons/fi';
 import { FaRegCalendarAlt, FaProcedures, FaRegChartBar } from 'react-icons/fa';
 import { BsClipboard2Pulse } from 'react-icons/bs';
 import PatientDetailModal from './PatientDetailsModal';
+import debounce from 'lodash.debounce';
 
 const TrackPatientRecords = () => {
     const navigate = useNavigate();
@@ -28,7 +28,7 @@ const TrackPatientRecords = () => {
     const [adultPatients, setAdultPatients] = useState([]);
     const [pediatricPatients, setPediatricPatients] = useState([]);
     const [emergencyPatients, setEmergencyPatients] = useState([]);
-    const [loading, setLoading] = useState(false);
+
     const [search, setSearch] = useState('');
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
@@ -40,7 +40,6 @@ const TrackPatientRecords = () => {
         abnormal_color_alerts: 0,
         severe_retention_cases: 0
     });
-    const [expandedPatients, setExpandedPatients] = useState({});
     const [activeTab, setActiveTab] = useState('all');
     const [criticalAlerts, setCriticalAlerts] = useState([]);
     const [showFilters, setShowFilters] = useState(false);
@@ -51,13 +50,25 @@ const TrackPatientRecords = () => {
         complianceRate: 0,
         alertTrend: 'down'
     });
-    const [searchTimeout, setSearchTimeout] = useState(null);
+    const [isFetching, setIsFetching] = useState(false);
+    const [hasMore, setHasMore] = useState(true);
+    const [page, setPage] = useState(1);
+    const [totalPatients, setTotalPatients] = useState(0);
+    const containerRef = useRef(null);
 
     // Virtual scrolling state
     const [visiblePatients, setVisiblePatients] = useState([]);
     const [startIndex, setStartIndex] = useState(0);
     const [endIndex, setEndIndex] = useState(50);
-    const patientItemHeight = 60; // Estimated height of each patient row in pixels
+    const patientItemHeight = 72;
+
+    // Debounced search function
+    const debouncedSearch = useCallback(
+        debounce((searchValue) => {
+            fetchTreatments(searchValue, 1, true);
+        }, 500),
+        []
+    );
 
     const getSurname = useCallback((fullName) => {
         if (!fullName) return { givenNames: '', surname: '' };
@@ -114,41 +125,51 @@ const TrackPatientRecords = () => {
     const handleSearchChange = (e) => {
         const value = e.target.value;
         setSearch(value);
-        
-        if (searchTimeout) {
-            clearTimeout(searchTimeout);
-        }
-        
-        setSearchTimeout(setTimeout(() => {
-            fetchTreatments();
-        }, 300));
+        debouncedSearch(value);
     };
 
-    const fetchTreatments = useCallback(async () => {
+    const fetchTreatments = useCallback(async (searchTerm = '', pageNum = 1, isNewSearch = false) => {
+        if (isFetching) return;
+        
         try {
+            setIsFetching(true);
             const params = new URLSearchParams();
-            if (search && search.length >= 2) params.append('search', search);
+            if (searchTerm.length >= 2) params.append('search', searchTerm);
             if (dateFrom) params.append('date_from', dateFrom);
             if (dateTo) params.append('date_to', dateTo);
             if (activeTab !== 'all') params.append('status', activeTab);
             params.append('stats_period', statsPeriod);
-    
+            params.append('page', pageNum);
+            params.append('limit', 100); // Fetch 100 records per page
+
             const endpoint = '/doctor/patient-treatments';
-    
+
             const response = await axios.get(`${endpoint}?${params.toString()}`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('token')}`,
                     'Accept': 'application/json'
                 }
             });
-    
+
             if (!response.data.success) {
                 throw new Error(response.data.message || 'Failed to fetch treatments');
             }
-    
-            const sortedPatients = sortPatients(response.data.patients);
-            setPatients(sortedPatients);
+
+            const newPatients = isNewSearch ? response.data.patients : [...patients, ...response.data.patients];
+            const sortedPatients = sortPatients(newPatients);
             
+            if (isNewSearch) {
+                setPatients(sortedPatients);
+                setPage(2); // Reset to page 2 for next load
+            } else {
+                setPatients(sortedPatients);
+                setPage(prevPage => prevPage + 1);
+            }
+
+            setTotalPatients(response.data.total_patients || 0);
+            setHasMore(response.data.has_more || false);
+
+            // Categorize patients
             const adults = [];
             const pediatric = [];
             const emergency = [];
@@ -157,7 +178,7 @@ const TrackPatientRecords = () => {
                 const stats = calculatePatientStats(patient);
                 const age = calculateAge(patient.date_of_birth);
                 
-                if (stats.severityLevel >= 2) { // Severe cases
+                if (stats.severityLevel >= 2) {
                     emergency.push(patient);
                 } else if (age >= 18) {
                     adults.push(patient);
@@ -170,6 +191,7 @@ const TrackPatientRecords = () => {
             setPediatricPatients(pediatric);
             setEmergencyPatients(emergency);
             
+            // Calculate quick stats
             let totalNetUF = 0;
             let totalTreatments = 0;
             sortedPatients.forEach(patient => {
@@ -198,6 +220,7 @@ const TrackPatientRecords = () => {
                 total_net_uf: totalNetUF
             });
             
+            // Generate alerts
             const alerts = [];
             sortedPatients.forEach(patient => {
                 const stats = calculatePatientStats(patient);
@@ -262,51 +285,35 @@ const TrackPatientRecords = () => {
             } else {
                 alert(`Error: ${error.message}`);
             }
+        } finally {
+            setIsFetching(false);
         }
-    }, [search, dateFrom, dateTo, activeTab, statsPeriod, sortPatients, formatNameBySurname, navigate]);
+    }, [patients, dateFrom, dateTo, activeTab, statsPeriod, sortPatients, formatNameBySurname, navigate, isFetching]);
 
+    // Initial load and filter changes
     useEffect(() => {
-        fetchTreatments();
-        
-        return () => {
-            if (searchTimeout) {
-                clearTimeout(searchTimeout);
-            }
-        };
-    }, [dateFrom, dateTo, activeTab, statsPeriod, fetchTreatments]);
+        fetchTreatments(search, 1, true);
+    }, [dateFrom, dateTo, activeTab, statsPeriod]);
 
-    // Virtual scroll handler
+    // Infinite scroll handler
     useEffect(() => {
         const handleScroll = () => {
-            const scrollContainer = document.querySelector('.patient-list-container');
-            if (!scrollContainer) return;
-
-            const scrollTop = scrollContainer.scrollTop;
-            const clientHeight = scrollContainer.clientHeight;
+            if (!containerRef.current || isFetching || !hasMore) return;
             
-            const newStartIndex = Math.floor(scrollTop / patientItemHeight);
-            const newEndIndex = Math.min(
-                newStartIndex + Math.ceil(clientHeight / patientItemHeight) + 10,
-                patients.length
-            );
-
-            if (newStartIndex !== startIndex || newEndIndex !== endIndex) {
-                setStartIndex(newStartIndex);
-                setEndIndex(newEndIndex);
+            const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+            if (scrollHeight - scrollTop <= clientHeight * 1.2) {
+                fetchTreatments(search, page, false);
             }
         };
 
-        const scrollContainer = document.querySelector('.patient-list-container');
+        const scrollContainer = containerRef.current;
         if (scrollContainer) {
             scrollContainer.addEventListener('scroll', handleScroll);
             return () => scrollContainer.removeEventListener('scroll', handleScroll);
         }
-    }, [patients.length, startIndex, endIndex]);
+    }, [fetchTreatments, isFetching, hasMore, page, search]);
 
-    useEffect(() => {
-        setVisiblePatients(patients.slice(startIndex, endIndex));
-    }, [patients, startIndex, endIndex]);
-
+    // Calculate age from date of birth
     const calculateAge = (dateOfBirth) => {
         if (!dateOfBirth) return 0;
         const birthDate = new Date(dateOfBirth);
@@ -321,6 +328,7 @@ const TrackPatientRecords = () => {
         return age;
     };
 
+    // Calculate patient statistics
     const calculatePatientStats = (patient) => {
         const treatmentCount = patient.treatments.length;
         let totalVolumeIn = 0;
@@ -359,7 +367,7 @@ const TrackPatientRecords = () => {
             treatmentsByDay[dayKey].dailyNetUF += balance;
             treatmentsByDay[dayKey].dayBalance += balance;
             
-            if (balance < 0) { // Fluid retention
+            if (balance < 0) {
                 treatmentsByDay[dayKey].retentionCount++;
             }
             
@@ -386,7 +394,6 @@ const TrackPatientRecords = () => {
                 incompleteDays++;
             }
             
-            // Check for severe retention (all treatments in a day show retention)
             if (dayData.retentionCount === dayData.treatments.length && dayData.treatments.length > 0) {
                 severeRetentionDays++;
             }
@@ -398,7 +405,7 @@ const TrackPatientRecords = () => {
         const totalNetUF = totalVolumeOut - totalVolumeIn;
         
         // Determine severity level
-        let severityLevel = 0; // 0 = normal, 1 = warning, 2 = severe
+        let severityLevel = 0;
         if (severeRetentionDays > 0) {
             severityLevel = 2;
         } else if (fluidDifference > 200) {
@@ -424,6 +431,7 @@ const TrackPatientRecords = () => {
         };
     };
 
+    // Format date for display
     const formatDate = (date) => {
         if (!date) return 'N/A';
         return new Date(date).toLocaleDateString('en-US', {
@@ -433,6 +441,7 @@ const TrackPatientRecords = () => {
         });
     };
 
+    // Get CSS class for fluid color
     const getColorClass = (color) => {
         if (!color) return '';
         color = color.toLowerCase();
@@ -442,37 +451,26 @@ const TrackPatientRecords = () => {
         return 'color-abnormal';
     };
 
-    const togglePatientSection = (patientId) => {
-        setExpandedPatients(prev => ({
-            ...prev,
-            [patientId]: !prev[patientId]
-        }));
-        
-        if (!expandedPatients[patientId]) {
-            setTimeout(() => {
-                const element = document.getElementById(`patient-${patientId}`);
-                if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }
-            }, 100);
-        }
-    };
-
+    // Clear all filters
     const clearFilters = () => {
         setSearch('');
         setDateFrom('');
         setDateTo('');
         setActiveTab('all');
+        fetchTreatments('', 1, true);
     };
 
+    // View patient details modal
     const viewPatientDetails = (patient) => {
         setSelectedPatient(patient);
     };
 
+    // Close patient details modal
     const closePatientDetails = () => {
         setSelectedPatient(null);
     };
 
+    // Calculate fluid balance
     const calculateBalance = (volumeIn, volumeOut) => {
         const balance = volumeOut - volumeIn;
         const isPositive = balance >= 0;
@@ -494,6 +492,7 @@ const TrackPatientRecords = () => {
         };
     };
 
+    // Get color for treatment status
     const getStatusColor = (status) => {
         switch(status?.toLowerCase()) {
             case 'finished': return '#28a745';
@@ -504,37 +503,7 @@ const TrackPatientRecords = () => {
         }
     };
 
-    const calculateDailySummary = (treatmentsByDay) => {
-        const dailySummaries = [];
-        
-        Object.entries(treatmentsByDay).forEach(([date, dayData]) => {
-            const treatments = dayData.treatments;
-            const totalVolumeIn = dayData.dailyVolumeIn;
-            const totalVolumeOut = dayData.dailyVolumeOut;
-            const dayBalance = dayData.dayBalance;
-            const retentionCount = dayData.retentionCount;
-            
-            const isCompleteDay = treatments.length >= 3;
-            const isSevereRetention = retentionCount === treatments.length && treatments.length > 0;
-            
-            dailySummaries.push({
-                date,
-                treatments,
-                totalVolumeIn,
-                totalVolumeOut,
-                dayBalance,
-                isCompleteDay,
-                isSevereRetention,
-                treatmentCount: treatments.length,
-                retentionCount
-            });
-        });
-        
-        dailySummaries.sort((a, b) => new Date(b.date) - new Date(a.date));
-        
-        return dailySummaries;
-    };
-
+    // Render a patient section (emergency, adult, pediatric)
     const renderPatientSection = (title, patientsList, isEmergency = false) => {
         if (patientsList.length === 0) return null;
 
@@ -547,7 +516,9 @@ const TrackPatientRecords = () => {
                     margin: 0,
                     color: isEmergency ? '#b91c1c' : '#2c3e50',
                     display: 'flex',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    fontSize: '1.1rem',
+                    fontWeight: '600'
                 }}>
                     {isEmergency ? (
                         <FiAlertTriangle style={{ marginRight: '0.8rem', color: '#dc2626' }} />
@@ -575,7 +546,7 @@ const TrackPatientRecords = () => {
                 <div style={{ overflow: 'hidden' }}>
                     <div style={{
                         display: 'grid',
-                        gridTemplateColumns: 'minmax(300px, 3fr) 1fr 1fr 1fr',
+                        gridTemplateColumns: 'minmax(250px, 2fr) 1fr 1fr 1fr 1fr',
                         padding: '1rem 1.5rem',
                         backgroundColor: isEmergency ? '#fef2f2' : '#f8f9fa',
                         borderBottom: `1px solid ${isEmergency ? '#fee2e2' : '#e1e5eb'}`,
@@ -585,45 +556,40 @@ const TrackPatientRecords = () => {
                         textTransform: 'uppercase',
                         letterSpacing: '0.5px'
                     }}>
-                        <div>Patient Name</div>
+                        <div>Patient</div>
+                        <div style={{ textAlign: 'center' }}>Status</div>
                         <div style={{ textAlign: 'center' }}>Compliance</div>
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ marginBottom: '2px' }}>Net UF</div>
-                            <div style={{ 
-                                fontSize: '0.7rem',
-                                fontWeight: '500',
-                                color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                textTransform: 'none'
-                            }}>
-                                Ultrafiltration
-                            </div>
-                        </div>
+                        <div style={{ textAlign: 'center' }}>Net UF</div>
                         <div style={{ textAlign: 'center' }}>Actions</div>
                     </div>
                     
-                    <div className="patient-list-container" style={{
-                        height: 'calc(100vh - 300px)',
-                        overflowY: 'auto',
-                        position: 'relative'
-                    }}>
+                    <div 
+                        className="patient-list-container" 
+                        ref={containerRef}
+                        style={{
+                            height: 'calc(100vh - 300px)',
+                            overflowY: 'auto',
+                            position: 'relative'
+                        }}
+                    >
                         <div style={{
                             height: `${patientsList.length * patientItemHeight}px`,
                             position: 'relative'
                         }}>
-                            {patientsList.slice(startIndex, endIndex).map((patient, index) => {
+                            {patientsList.map((patient, index) => {
                                 const stats = calculatePatientStats(patient);
-                                const isExpanded = expandedPatients[patient.patientID] || false;
                                 const hasAlerts = stats.complianceStatus === 'danger' || stats.hasAbnormalColor || stats.fluidRetentionAlert;
                                 const formattedName = formatNameBySurname(patient.name);
-                                const dailySummaries = calculateDailySummary(stats.treatmentsByDay);
+                                const statusColor = stats.severityLevel === 2 ? '#dc2626' : 
+                                                  stats.severityLevel === 1 ? '#f59e0b' : '#10b981';
                                 
                                 return (
                                     <div 
-                                        key={patient.patientID} 
+                                        key={`${patient.patientID}-${index}`} 
                                         id={`patient-${patient.patientID}`}
                                         style={{
                                             position: 'absolute',
-                                            top: `${(startIndex + index) * patientItemHeight}px`,
+                                            top: `${index * patientItemHeight}px`,
                                             width: '100%',
                                             borderBottom: '1px solid #eee',
                                             backgroundColor: isEmergency ? '#fff5f5' : (hasAlerts ? '#fff8f8' : '#fff'),
@@ -633,20 +599,15 @@ const TrackPatientRecords = () => {
                                         <div 
                                             style={{
                                                 display: 'grid',
-                                                gridTemplateColumns: 'minmax(300px, 3fr) 1fr 1fr 1fr',
+                                                gridTemplateColumns: 'minmax(250px, 2fr) 1fr 1fr 1fr 1fr',
                                                 padding: '1rem 1.5rem',
-                                                cursor: 'pointer',
-                                                transition: 'background-color 0.2s ease',
                                                 alignItems: 'center'
                                             }}
-                                            onClick={() => togglePatientSection(patient.patientID)}
-                                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = isEmergency ? '#fee2e2' : (hasAlerts ? '#ffefef' : '#f8f9fa')}
-                                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = isEmergency ? '#fff5f5' : (hasAlerts ? '#fff8f8' : '#fff')}
                                         >
                                             <div style={{ 
                                                 display: 'flex', 
                                                 alignItems: 'center',
-                                                minWidth: '300px',
+                                                minWidth: '250px',
                                                 paddingRight: '1rem'
                                             }}>
                                                 <div style={{
@@ -693,6 +654,29 @@ const TrackPatientRecords = () => {
                                                         {stats.age}y • {patient.gender || 'N/A'} • {stats.treatmentCount} treatments
                                                     </div>
                                                 </div>
+                                            </div>
+                                            
+                                            <div style={{ 
+                                                textAlign: 'center',
+                                                display: 'flex',
+                                                justifyContent: 'center'
+                                            }}>
+                                                <div style={{
+                                                    width: '12px',
+                                                    height: '12px',
+                                                    borderRadius: '50%',
+                                                    backgroundColor: statusColor,
+                                                    marginRight: '0.5rem'
+                                                }} />
+                                                <span style={{
+                                                    color: stats.severityLevel === 2 ? '#dc2626' : 
+                                                          stats.severityLevel === 1 ? '#f59e0b' : '#10b981',
+                                                    fontWeight: '500',
+                                                    fontSize: '0.85rem'
+                                                }}>
+                                                    {stats.severityLevel === 2 ? 'Critical' : 
+                                                     stats.severityLevel === 1 ? 'Warning' : 'Normal'}
+                                                </span>
                                             </div>
                                             
                                             <div style={{ textAlign: 'center' }}>
@@ -753,458 +737,13 @@ const TrackPatientRecords = () => {
                                                         fontSize: '0.8rem',
                                                         whiteSpace: 'nowrap'
                                                     }}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        viewPatientDetails(patient);
-                                                    }}
+                                                    onClick={() => viewPatientDetails(patient)}
                                                     onMouseOver={(e) => e.currentTarget.style.backgroundColor = isEmergency ? '#fecaca' : '#d4f0fd'}
                                                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = isEmergency ? '#fee2e2' : '#e9f7fe'}
                                                 >
                                                     <FiEye style={{ marginRight: '0.3rem' }} /> Details
                                                 </button>
-                                                <div style={{ 
-                                                    color: isEmergency ? '#fca5a5' : '#95a5a6',
-                                                    display: 'flex',
-                                                    alignItems: 'center'
-                                                }}>
-                                                    {isExpanded ? <FiChevronUp /> : <FiChevronDown />}
-                                                </div>
                                             </div>
-                                        </div>
-                                        
-                                        <div style={{
-                                            maxHeight: isExpanded ? 'none' : '0',
-                                            overflow: 'hidden',
-                                            transition: 'max-height 0.3s ease',
-                                            backgroundColor: isEmergency ? '#fff5f5' : '#f8f9fa',
-                                            borderTop: isExpanded ? '1px solid #eee' : 'none'
-                                        }}>
-                                            {isExpanded && (
-                                                <div style={{ padding: '1.5rem' }}>
-                                                    <div style={{ marginBottom: '1.5rem' }}>
-                                                        <div style={{
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            marginBottom: '1rem',
-                                                            color: isEmergency ? '#b91c1c' : '#2c3e50',
-                                                            fontWeight: '500'
-                                                        }}>
-                                                            <BsClipboard2Pulse style={{ 
-                                                                marginRight: '0.8rem',
-                                                                color: isEmergency ? '#dc2626' : '#2563eb'
-                                                            }} /> Clinical Summary
-                                                        </div>
-                                                        <div style={{
-                                                            display: 'grid',
-                                                            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-                                                            gap: '1rem'
-                                                        }}>
-                                                            <div style={{
-                                                                backgroundColor: '#fff',
-                                                                padding: '1rem',
-                                                                borderRadius: '8px',
-                                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                borderLeft: `3px solid ${isEmergency ? '#dc2626' : '#2563eb'}`
-                                                            }}>
-                                                                <div style={{ 
-                                                                    fontSize: '0.8rem',
-                                                                    color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                                                    marginBottom: '0.5rem'
-                                                                }}>Total Treatments</div>
-                                                                <div style={{ 
-                                                                    fontSize: '1.2rem',
-                                                                    fontWeight: '600',
-                                                                    color: isEmergency ? '#b91c1c' : '#2c3e50'
-                                                                }}>{stats.treatmentCount}</div>
-                                                            </div>
-                                                            <div style={{
-                                                                backgroundColor: '#fff',
-                                                                padding: '1rem',
-                                                                borderRadius: '8px',
-                                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                borderLeft: '3px solid #17a2b8'
-                                                            }}>
-                                                                <div style={{ 
-                                                                    fontSize: '0.8rem',
-                                                                    color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                                                    marginBottom: '0.5rem'
-                                                                }}>Avg Volume In</div>
-                                                                <div style={{ 
-                                                                    fontSize: '1.2rem',
-                                                                    fontWeight: '600',
-                                                                    color: isEmergency ? '#b91c1c' : '#2c3e50'
-                                                                }}>{stats.avgVolumeIn}mL</div>
-                                                            </div>
-                                                            <div style={{
-                                                                backgroundColor: '#fff',
-                                                                padding: '1rem',
-                                                                borderRadius: '8px',
-                                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                borderLeft: '3px solid #17a2b8'
-                                                            }}>
-                                                                <div style={{ 
-                                                                    fontSize: '0.8rem',
-                                                                    color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                                                    marginBottom: '0.5rem'
-                                                                }}>Avg Volume Out</div>
-                                                                <div style={{ 
-                                                                    fontSize: '1.2rem',
-                                                                    fontWeight: '600',
-                                                                    color: isEmergency ? '#b91c1c' : '#2c3e50'
-                                                                }}>{stats.avgVolumeOut}mL</div>
-                                                            </div>
-                                                            <div style={{
-                                                                backgroundColor: '#fff',
-                                                                padding: '1rem',
-                                                                borderRadius: '8px',
-                                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                borderLeft: '3px solid #28a745'
-                                                            }}>
-                                                                <div style={{ 
-                                                                    fontSize: '0.8rem',
-                                                                    color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                                                    marginBottom: '0.5rem'
-                                                                }}>Total Net UF</div>
-                                                                <div style={{ 
-                                                                    fontSize: '1.2rem',
-                                                                    fontWeight: '600',
-                                                                    color: stats.totalNetUF >= 0 ? '#28a745' : '#dc3545'
-                                                                }}>
-                                                                    {stats.totalNetUF >= 0 ? '-' : '+'}{Math.abs(stats.totalNetUF)}mL
-                                                                </div>
-                                                            </div>
-                                                            <div style={{
-                                                                backgroundColor: '#fff',
-                                                                padding: '1rem',
-                                                                borderRadius: '8px',
-                                                                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                borderLeft: '3px solid #e83e8c'
-                                                            }}>
-                                                                <div style={{ 
-                                                                    fontSize: '0.8rem',
-                                                                    color: isEmergency ? '#ef4444' : '#7f8c8d',
-                                                                    marginBottom: '0.5rem'
-                                                                }}>Incomplete Days</div>
-                                                                <div style={{ 
-                                                                    fontSize: '1.2rem',
-                                                                    fontWeight: '600',
-                                                                    color: stats.incompleteDays > 0 ? '#dc3545' : '#28a745'
-                                                                }}>
-                                                                    {stats.incompleteDays}
-                                                                </div>
-                                                            </div>
-                                                            {isEmergency && (
-                                                                <div style={{
-                                                                    backgroundColor: '#fff',
-                                                                    padding: '1rem',
-                                                                    borderRadius: '8px',
-                                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                    borderLeft: '3px solid #dc2626'
-                                                                }}>
-                                                                    <div style={{ 
-                                                                        fontSize: '0.8rem',
-                                                                        color: '#ef4444',
-                                                                        marginBottom: '0.5rem'
-                                                                    }}>Severe Retention Days</div>
-                                                                    <div style={{ 
-                                                                        fontSize: '1.2rem',
-                                                                        fontWeight: '600',
-                                                                        color: '#b91c1c'
-                                                                    }}>
-                                                                        {stats.severeRetentionDays}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    {hasAlerts && (
-                                                        <div style={{ marginBottom: '1.5rem' }}>
-                                                            <div style={{
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                marginBottom: '1rem',
-                                                                color: isEmergency ? '#b91c1c' : '#2c3e50',
-                                                                fontWeight: '500'
-                                                            }}>
-                                                                <FiAlertTriangle style={{ 
-                                                                    marginRight: '0.8rem',
-                                                                    color: isEmergency ? '#dc2626' : '#e74c3c'
-                                                                }} /> Clinical Alerts
-                                                            </div>
-                                                            <div style={{
-                                                                display: 'grid',
-                                                                gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                                                                gap: '1rem'
-                                                            }}>
-                                                                {stats.complianceStatus === 'danger' && (
-                                                                    <div style={{
-                                                                        backgroundColor: '#fff',
-                                                                        padding: '1rem',
-                                                                        borderRadius: '8px',
-                                                                        borderLeft: '4px solid #dc3545',
-                                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                                                                    }}>
-                                                                        <div style={{ 
-                                                                            display: 'flex',
-                                                                            alignItems: 'center',
-                                                                            color: '#dc3545',
-                                                                            fontWeight: '500',
-                                                                            marginBottom: '0.5rem'
-                                                                        }}>
-                                                                            <FiXCircle style={{ marginRight: '0.5rem' }} /> Treatment Compliance Issue
-                                                                        </div>
-                                                                        <div style={{ 
-                                                                            fontSize: '0.9rem',
-                                                                            color: '#6c757d'
-                                                                        }}>
-                                                                            Patient had {stats.incompleteDays} day{stats.incompleteDays > 1 ? 's' : ''} with less than 3 completed treatments
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {stats.hasAbnormalColor && (
-                                                                    <div style={{
-                                                                        backgroundColor: '#fff',
-                                                                        padding: '1rem',
-                                                                        borderRadius: '8px',
-                                                                        borderLeft: '4px solid #ffc107',
-                                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                                                                    }}>
-                                                                        <div style={{ 
-                                                                            display: 'flex',
-                                                                            alignItems: 'center',
-                                                                            color: '#ffc107',
-                                                                            fontWeight: '500',
-                                                                            marginBottom: '0.5rem'
-                                                                        }}>
-                                                                            <FiDroplet style={{ marginRight: '0.5rem' }} /> Abnormal Drain Color
-                                                                        </div>
-                                                                        <div style={{ 
-                                                                            fontSize: '0.9rem',
-                                                                            color: '#6c757d'
-                                                                        }}>
-                                                                            Abnormal peritoneal fluid color detected in recent treatments
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                {stats.fluidRetentionAlert && (
-                                                                    <div style={{
-                                                                        backgroundColor: '#fff',
-                                                                        padding: '1rem',
-                                                                        borderRadius: '8px',
-                                                                        borderLeft: isEmergency ? '4px solid #dc2626' : '4px solid #fd7e14',
-                                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                                                                    }}>
-                                                                        <div style={{ 
-                                                                            display: 'flex',
-                                                                            alignItems: 'center',
-                                                                            color: isEmergency ? '#dc2626' : '#fd7e14',
-                                                                            fontWeight: '500',
-                                                                            marginBottom: '0.5rem'
-                                                                        }}>
-                                                                            <FiThermometer style={{ marginRight: '0.5rem' }} /> 
-                                                                            {isEmergency ? 'Severe Fluid Retention' : 'Fluid Retention'}
-                                                                        </div>
-                                                                        <div style={{ 
-                                                                            fontSize: '0.9rem',
-                                                                            color: '#6c757d'
-                                                                        }}>
-                                                                            Possible fluid retention of {stats.fluidDifference}mL
-                                                                            <div style={{ 
-                                                                                fontSize: '0.8rem',
-                                                                                marginTop: '0.3rem',
-                                                                                color: '#adb5bd'
-                                                                            }}>
-                                                                                (Avg In: {stats.avgVolumeIn}mL, Avg Out: {stats.avgVolumeOut}mL)
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    
-                                                    <div>
-                                                        <div style={{
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            marginBottom: '1rem',
-                                                            color: isEmergency ? '#b91c1c' : '#2c3e50',
-                                                            fontWeight: '500'
-                                                        }}>
-                                                            <FaRegChartBar style={{ 
-                                                                marginRight: '0.8rem',
-                                                                color: isEmergency ? '#dc2626' : '#2563eb'
-                                                            }} /> Daily Treatment Summary
-                                                        </div>
-                                                        
-                                                        {dailySummaries.map((daySummary, dayIndex) => {
-                                                            const dayBalance = daySummary.dayBalance;
-                                                            const isPositiveBalance = dayBalance >= 0;
-                                                            
-                                                            return (
-                                                                <div key={dayIndex} style={{
-                                                                    backgroundColor: '#fff',
-                                                                    borderRadius: '8px',
-                                                                    overflow: 'hidden',
-                                                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                                                                    marginBottom: '1rem',
-                                                                    borderLeft: daySummary.isSevereRetention ? '4px solid #dc2626' : 'none'
-                                                                }}>
-                                                                    <div style={{
-                                                                        display: 'flex',
-                                                                        justifyContent: 'space-between',
-                                                                        alignItems: 'center',
-                                                                        padding: '0.8rem 1rem',
-                                                                        backgroundColor: isEmergency ? '#fee2e2' : '#f8f9fa',
-                                                                        borderBottom: '1px solid #eee'
-                                                                    }}>
-                                                                        <div style={{ 
-                                                                            fontWeight: '500',
-                                                                            color: isEmergency ? '#b91c1c' : '#2c3e50'
-                                                                        }}>
-                                                                            {formatDate(daySummary.date)}
-                                                                            {!daySummary.isCompleteDay && (
-                                                                                <span style={{
-                                                                                    marginLeft: '0.5rem',
-                                                                                    padding: '0.2rem 0.5rem',
-                                                                                    backgroundColor: '#f8d7da',
-                                                                                    color: '#721c24',
-                                                                                    borderRadius: '4px',
-                                                                                    fontSize: '0.8rem'
-                                                                                }}>
-                                                                                    Only {daySummary.treatmentCount} treatment{daySummary.treatmentCount > 1 ? 's' : ''}
-                                                                                </span>
-                                                                            )}
-                                                                            {daySummary.isSevereRetention && (
-                                                                                <span style={{
-                                                                                    marginLeft: '0.5rem',
-                                                                                    padding: '0.2rem 0.5rem',
-                                                                                    backgroundColor: '#fee2e2',
-                                                                                    color: '#b91c1c',
-                                                                                    borderRadius: '4px',
-                                                                                    fontSize: '0.8rem'
-                                                                                }}>
-                                                                                    Severe Retention
-                                                                                </span>
-                                                                            )}
-                                                                        </div>
-                                                                        <div style={{ 
-                                                                            fontWeight: '600',
-                                                                            color: isPositiveBalance ? '#28a745' : '#dc3545'
-                                                                        }}>
-                                                                            {isPositiveBalance ? '-' : '+'}{Math.abs(dayBalance)}mL
-                                                                        </div>
-                                                                    </div>
-                                                                    
-                                                                    <div style={{
-                                                                        display: 'grid',
-                                                                        gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
-                                                                        padding: '0.8rem 1rem',
-                                                                        backgroundColor: isEmergency ? '#fee2e2' : '#f8f9fa',
-                                                                        borderBottom: '1px solid #eee',
-                                                                        fontWeight: '500',
-                                                                        color: isEmergency ? '#b91c1c' : '#2c3e50',
-                                                                        fontSize: '0.8rem'
-                                                                    }}>
-                                                                        <div>Volume In</div>
-                                                                        <div>Volume Out</div>
-                                                                        <div>Net UF (Balance)</div>
-                                                                        <div>Color</div>
-                                                                        <div>Status</div>
-                                                                    </div>
-                                                                    
-                                                                    {daySummary.treatments.map((treatment, index) => {
-                                                                        const balance = calculateBalance(treatment.VolumeIn, treatment.VolumeOut);
-                                                                        const colorClass = getColorClass(treatment.Color);
-                                                                        
-                                                                        return (
-                                                                            <div key={index} style={{
-                                                                                display: 'grid',
-                                                                                gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
-                                                                                padding: '0.8rem 1rem',
-                                                                                borderBottom: '1px solid #eee',
-                                                                                fontSize: '0.9rem',
-                                                                                alignItems: 'center',
-                                                                                backgroundColor: balance.value < 0 ? '#fff5f5' : '#fff'
-                                                                            }}>
-                                                                                <div>
-                                                                                    {treatment.VolumeIn || 'N/A'}mL
-                                                                                </div>
-                                                                                <div>
-                                                                                    {treatment.VolumeOut || 'N/A'}mL
-                                                                                </div>
-                                                                                <div style={{
-                                                                                    fontWeight: '500',
-                                                                                    color: balance.isPositive ? '#28a745' : '#dc3545'
-                                                                                }}>
-                                                                                    {balance.formatted}
-                                                                                    <div style={{ 
-                                                                                        fontSize: '0.7rem',
-                                                                                        color: '#adb5bd'
-                                                                                    }}>
-                                                                                        {balance.interpretation}
-                                                                                    </div>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <span style={{
-                                                                                        display: 'inline-block',
-                                                                                        padding: '0.2rem 0.5rem',
-                                                                                        borderRadius: '4px',
-                                                                                        backgroundColor: colorClass === 'color-clear' ? '#e3f2fd' : 
-                                                                                                       colorClass === 'color-normal' ? '#e8f5e9' : '#ffebee',
-                                                                                        color: colorClass === 'color-clear' ? '#1976d2' : 
-                                                                                              colorClass === 'color-normal' ? '#2e7d32' : '#c62828',
-                                                                                        fontSize: '0.8rem'
-                                                                                    }}>
-                                                                                        {treatment.Color || 'N/A'}
-                                                                                    </span>
-                                                                                </div>
-                                                                                <div>
-                                                                                    <span style={{
-                                                                                        display: 'inline-block',
-                                                                                        padding: '0.2rem 0.5rem',
-                                                                                        borderRadius: '4px',
-                                                                                        backgroundColor: getStatusColor(treatment.TreatmentStatus) + '20',
-                                                                                        color: getStatusColor(treatment.TreatmentStatus),
-                                                                                        fontSize: '0.8rem'
-                                                                                    }}>
-                                                                                        {treatment.TreatmentStatus || 'Unknown'}
-                                                                                    </span>
-                                                                                </div>
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                    
-                                                                    <div style={{
-                                                                        display: 'grid',
-                                                                        gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr',
-                                                                        padding: '0.8rem 1rem',
-                                                                        backgroundColor: isEmergency ? '#fee2e2' : '#e9ecef',
-                                                                        fontWeight: 500,
-                                                                        fontSize: '0.9rem',
-                                                                    }}>
-                                                                        <div style={{ fontWeight: 700 }}>
-                                                                            Daily Net Fluid Balance:
-                                                                        </div>
-                                                                        <div>{daySummary.totalVolumeIn} mL</div>
-                                                                        <div>{daySummary.totalVolumeOut} mL</div>
-                                                                        <div style={{
-                                                                            color: isPositiveBalance ? '#28a745' : '#dc3545',
-                                                                        }}>
-                                                                            {isPositiveBalance ? '-' : '+'}
-                                                                            {Math.abs(dayBalance)} mL
-                                                                        </div>
-                                                                        <div></div>
-                                                                    </div>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1223,7 +762,11 @@ const TrackPatientRecords = () => {
             minHeight: '100vh',
             color: '#333',
             position: 'relative',
-            width: '100%',
+            width: '130%',
+            maxWidth: '100vw',
+            overflowX: 'hidden',
+            marginLeft: '-5%',
+            marginTop: '-250px',
         }}>
             <header style={{
                 display: 'flex',
@@ -1234,7 +777,8 @@ const TrackPatientRecords = () => {
                 boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
                 position: 'sticky',
                 top: 0,
-                zIndex: 100
+                zIndex: 100,
+                width: '100%'
             }}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                     <button 
@@ -1291,7 +835,10 @@ const TrackPatientRecords = () => {
                 backgroundColor: '#fff',
                 margin: '1rem 2rem',
                 borderRadius: '8px',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+                boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
+                width: 'calc(100% - 4rem)',
+                maxWidth: '100%',
+                boxSizing: 'border-box'
             }}>
                 <div style={{
                     position: 'relative',
@@ -1336,10 +883,10 @@ const TrackPatientRecords = () => {
                             }}
                             onClick={() => {
                                 setSearch('');
-                                fetchTreatments();
+                                fetchTreatments('', 1, true);
                             }}
                         >
-                            <FiXCircle />
+                            <FiX />
                         </button>
                     )}
                 </div>
@@ -1373,7 +920,10 @@ const TrackPatientRecords = () => {
                     margin: '0 2rem 1rem',
                     padding: '1.5rem',
                     borderRadius: '8px',
-                    boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
+                    width: 'calc(100% - 4rem)',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box'
                 }}>
                     <div style={{ marginBottom: '1.5rem' }}>
                         <div style={{ 
@@ -1529,7 +1079,7 @@ const TrackPatientRecords = () => {
                             transition: 'all 0.3s ease',
                             fontSize: '0.9rem'
                         }}
-                            onClick={fetchTreatments}
+                            onClick={() => fetchTreatments(search, 1, true)}
                             onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#2980b9'}
                             onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#3498db'}
                         >
@@ -1559,14 +1109,18 @@ const TrackPatientRecords = () => {
                 display: 'flex',
                 margin: '0 2rem 2rem',
                 gap: '1.5rem',
-                flexDirection: window.innerWidth < 1200 ? 'column' : 'row'
+                flexDirection: window.innerWidth < 1200 ? 'column' : 'row',
+                width: 'calc(100% - 4rem)',
+                maxWidth: '100%',
+                boxSizing: 'border-box'
             }}>
                 <div style={{
                     flex: '3',
                     backgroundColor: '#fff',
                     borderRadius: '8px',
                     boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
-                    overflow: 'hidden'
+                    overflow: 'hidden',
+                    width: '100%'
                 }}>
                     <div style={{
                         padding: '1.2rem 1.5rem',
@@ -1579,11 +1133,13 @@ const TrackPatientRecords = () => {
                             margin: 0,
                             display: 'flex',
                             alignItems: 'center',
-                            color: '#2c3e50'
+                            color: '#2c3e50',
+                            fontSize: '1.2rem'
                         }}>
                             <FaProcedures style={{ 
                                 marginRight: '0.8rem',
-                                color: '#3498db'
+                                color: '#3498db',
+                                fontSize: '1.2rem'
                             }} /> 
                             Continuous Ambulatory Peritoneal Dialysis Patients
                             <span style={{
@@ -1593,11 +1149,11 @@ const TrackPatientRecords = () => {
                                 padding: '0.2rem 0.5rem',
                                 fontSize: '0.8rem',
                                 marginLeft: '0.8rem'
-                            }}>{patients.length}</span>
+                            }}>{totalPatients}</span>
                         </h3>
                     </div>
                     
-                    {patients.length === 0 ? (
+                    {patients.length === 0 && !isFetching ? (
                         <div style={{
                             padding: '3rem',
                             display: 'flex',
@@ -1623,7 +1179,7 @@ const TrackPatientRecords = () => {
                                 cursor: 'pointer',
                                 transition: 'all 0.3s ease'
                             }}
-                                onClick={fetchTreatments}
+                                onClick={() => fetchTreatments('', 1, true)}
                                 onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#2980b9'}
                                 onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#3498db'}
                             >
@@ -1631,7 +1187,7 @@ const TrackPatientRecords = () => {
                             </button>
                         </div>
                     ) : (
-                        <div style={{ overflowX: 'auto' }}>
+                        <div style={{ overflowX: 'auto', width: '100%' }}>
                             <div style={{ minWidth: '1000px' }}>
                                 {renderPatientSection('Emergency Cases', emergencyPatients, true)}
                                 {renderPatientSection('Adult Patients', adultPatients)}
@@ -1648,18 +1204,21 @@ const TrackPatientRecords = () => {
                     boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
                     alignSelf: 'flex-start',
                     position: window.innerWidth < 1200 ? 'static' : 'sticky',
-                    top: '1rem'
+                    top: '1rem',
+                    width: '100%'
                 }}>
                     <div style={{ padding: '1.5rem' }}>
                         <h3 style={{
                             margin: '0 0 1.5rem',
                             display: 'flex',
                             alignItems: 'center',
-                            color: '#2c3e50'
+                            color: '#2c3e50',
+                            fontSize: '1.2rem'
                         }}>
                             <FiBarChart2 style={{ 
                                 marginRight: '0.8rem',
-                                color: '#3498db'
+                                color: '#3498db',
+                                fontSize: '1.2rem'
                             }} /> Clinical Summary
                         </h3>
                         <div style={{

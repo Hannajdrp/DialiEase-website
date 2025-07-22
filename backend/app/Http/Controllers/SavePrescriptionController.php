@@ -2,98 +2,208 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Prescription;
-use PDF;
+use App\Models\Patient;
+use App\Models\User;
+use App\Models\AuditLog;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use PDF;
 
 class SavePrescriptionController extends Controller
 {
-    public function store(Request $request)
+    public function generatePrescription(Request $request)
     {
-        $validated = $request->validate([
-            'patient_id' => 'required|exists:patients,id',
-            'medicines' => 'required|array',
-            'additional_instructions' => 'nullable|string',
-            'pd_data' => 'nullable|array'
-        ]);
-
         try {
-            // Get patient data
-            $patient = \App\Models\Patient::findOrFail($validated['patient_id']);
-            
-            // Prepare data for PDF
+            $validated = $request->validate([
+                'patientName' => 'required|string',
+                'patientHospitalNumber' => 'nullable|string',
+                'medicines' => 'required|array|min:1',
+                'medicines.*.name' => 'required|string',
+                'medicines.*.dosage' => 'required|string',
+                'medicines.*.frequency' => 'required|string',
+                'medicines.*.duration' => 'required|string',
+                'additional_instructions' => 'nullable|string',
+                'pd_data' => 'nullable|array'
+            ]);
+
+            $doctor = auth()->user();
+            if (!$doctor) {
+                throw new \Exception("User not authenticated");
+            }
+
+            // Find or create patient
+            $patient = null;
+            if (!empty($validated['patientHospitalNumber'])) {
+                $patient = Patient::where('hospitalNumber', $validated['patientHospitalNumber'])->first();
+                
+                if (!$patient) {
+                    // Create new patient if not found
+                    $patient = Patient::create([
+                        'hospitalNumber' => $validated['patientHospitalNumber'],
+                        'AccStatus' => 'active',
+                        'TermsAndCondition' => 'accepted',
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+
+                    $this->logAudit($doctor->userID, 
+                        "Created new patient with hospital number: {$validated['patientHospitalNumber']}"
+                    );
+                }
+            }
+
+            // Generate PDF data
             $pdfData = [
+                'patient' => [
+                    'name' => $validated['patientName'],
+                    'hospitalNumber' => $validated['patientHospitalNumber'] ?? null
+                ],
                 'medicines' => $validated['medicines'],
-                'pdData' => $validated['pd_data'] ?? null,
-                'additionalInstructions' => $validated['additional_instructions'] ?? '',
-                'date' => now()->format('Y-m-d H:i:s'),
-                'patient' => $patient
+                'additional_instructions' => $validated['additional_instructions'] ?? '',
+                'pd_data' => $validated['pd_data'] ?? null,
+                'doctor' => [
+                    'name' => $doctor->first_name . ' ' . $doctor->last_name,
+                    'specialization' => $doctor->specialization ?? 'General Physician',
+                ],
+                'date' => now()->format('F j, Y'),
+                'time' => now()->format('g:i A')
             ];
 
             // Generate PDF
-            $pdf = PDF::loadView('prescriptions.pdf', $pdfData);
-            
-            // Validate PDF generation
+            $pdf = PDF::loadView('prescription', $pdfData);
             $pdfContent = $pdf->output();
-            if (empty($pdfContent)) {
-                throw new \Exception("PDF generation failed - empty output");
+
+            // Generate unique filename
+            $fileName = 'prescriptions/prescription_' . time() . '_' . uniqid() . '.pdf';
+
+            // Store the PDF file
+            Storage::put($fileName, $pdfContent);
+
+            // Save to database
+            $prescriptionData = [
+                'userID' => $doctor->userID, // Add the doctor's userID here
+                'prescription_file' => $fileName,
+                'pd_data' => json_encode($validated['pd_data'] ?? null),
+                'prescription_blob' => $pdfContent,
+                'created_at' => now(),
+                'updated_at' => now()
+            ];
+
+            // Add patientID if available
+            if ($patient) {
+                $prescriptionData['patientID'] = $patient->patientID;
             }
 
-            // Save PDF to storage
-            $fileName = 'prescription_'.$patient->id.'_'.time().'.pdf';
-            $filePath = 'prescriptions/'.$fileName;
-            
-            Storage::makeDirectory('prescriptions');
-            Storage::put($filePath, $pdfContent);
+            $prescription = Prescription::create($prescriptionData);
 
-            // Create prescription record
-            $prescription = Prescription::create([
-                'userID' => auth()->id(),
-                'patient_ID' => $validated['patient_id'],
-                'prescription_file' => $filePath,
-                'prescription_date' => now(),
-                'additional_instructions' => $validated['additional_instructions'],
-                'medicines_data' => json_encode($validated['medicines']),
-                'pd_data' => isset($validated['pd_data']) ? json_encode($validated['pd_data']) : null
-            ]);
+            // Log the prescription creation
+            $this->logAudit($doctor->userID, 
+                "Created prescription #{$prescription->id} for " . 
+                ($patient ? "patient {$patient->hospitalNumber}" : "new patient")
+            );
 
             return response()->json([
                 'success' => true,
-                'message' => 'Prescription generated successfully',
-                'data' => $prescription,
-                'pdf_url' => Storage::url($filePath)
+                'message' => 'Prescription saved successfully',
+                'prescription_id' => $prescription->id,
+                'file_path' => $fileName
             ]);
 
         } catch (\Exception $e) {
-            \Log::error("Prescription generation failed: " . $e->getMessage());
+            Log::error('Prescription generation failed: ' . $e->getMessage());
+            
+            // Log the failed attempt if we have the doctor info
+            if (isset($doctor)) {
+                $this->logAudit($doctor->userID, 
+                    "Failed to create prescription: " . $e->getMessage()
+                );
+            }
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to generate prescription: ' . $e->getMessage(),
-                'trace' => config('app.debug') ? $e->getTrace() : null
+                'message' => 'Failed to generate prescription: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    public function show($patientId)
+    public function generatePdf(Request $request)
     {
-        // Ensure the patient can only see their own prescriptions
-        $prescriptions = Prescription::with(['patient', 'doctor'])
-            ->where('patient_ID', $patientId)
-            ->latest()
-            ->get()
-            ->map(function($prescription) {
-                return [
-                    'id' => $prescription->id,
-                    'date' => $prescription->prescription_date->format('Y-m-d H:i'),
-                    'doctor' => $prescription->doctor->name,
-                    'file_url' => Storage::url($prescription->prescription_file),
-                    'additional_instructions' => $prescription->additional_instructions,
-                    'medicines' => json_decode($prescription->medicines_data, true),
-                    'pd_data' => $prescription->pd_data ? json_decode($prescription->pd_data, true) : null
-                ];
-            });
+        try {
+            $validated = $request->validate([
+                'patientName' => 'required|string',
+                'patientHospitalNumber' => 'nullable|string',
+                'medicines' => 'required|array|min:1',
+                'medicines.*.name' => 'required|string',
+                'medicines.*.dosage' => 'required|string',
+                'medicines.*.frequency' => 'required|string',
+                'medicines.*.duration' => 'required|string',
+                'additional_instructions' => 'nullable|string',
+                'pd_data' => 'nullable|array'
+            ]);
 
-        return response()->json($prescriptions);
+            $doctor = auth()->user();
+            if (!$doctor) {
+                Log::warning('PDF generation blocked: unauthenticated');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'User is not authenticated'
+                ], 401);
+            }
+
+            $pdfData = [
+                'patient' => [
+                    'name' => $validated['patientName'],
+                    'hospitalNumber' => $validated['patientHospitalNumber'] ?? null
+                ],
+                'medicines' => $validated['medicines'],
+                'additional_instructions' => $validated['additional_instructions'] ?? '',
+                'pd_data' => $validated['pd_data'] ?? null,
+                'doctor' => [
+                    'name' => $doctor->first_name . ' ' . $doctor->last_name,
+                    'specialization' => $doctor->specialization ?? 'General Physician',
+                ],
+                'date' => now()->format('F j, Y'),
+                'time' => now()->format('g:i A')
+            ];
+
+            $pdf = PDF::loadView('prescription', $pdfData);
+            
+            // Log the PDF preview generation
+            $this->logAudit($doctor->userID, 
+                "Generated PDF preview for patient: {$validated['patientName']}" . 
+                ($validated['patientHospitalNumber'] ? " (HN: {$validated['patientHospitalNumber']})" : "")
+            );
+
+            return $pdf->stream('prescription_preview.pdf');
+
+        } catch (\Exception $e) {
+            Log::error('PDF generation failed: ' . $e->getMessage());
+            
+            if (isset($doctor)) {
+                $this->logAudit($doctor->userID, 
+                    "Failed to generate PDF preview: " . $e->getMessage()
+                );
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate PDF: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function logAudit($userID, $action)
+    {
+        try {
+            AuditLog::create([
+                'userID' => $userID,
+                'action' => $action,
+                'timestamp' => now()
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Failed to log audit trail: ' . $e->getMessage());
+        }
     }
 }

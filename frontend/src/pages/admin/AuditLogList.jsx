@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   FaSearch, FaFilePdf, FaChevronLeft, FaChevronRight, 
-  FaSync, FaBell, FaTimes, FaBars, FaChartLine 
+  FaBell, FaTimes, FaBars, FaChartLine, FaChartBar,
+  FaShieldAlt, FaLock, FaUserShield, FaExclamationTriangle
 } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import AdminSidebar from './AdminSidebar';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import AnalyticsModal from './AnalyticsModal';
 import logoImage from "../../images/logo.PNG";
 import staffPic from "../../assets/images/staffPic.PNG";
 import noResultsImage from '../../assets/images/no-results.PNG';
@@ -19,7 +21,7 @@ const AuditLogList = () => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [logsPerPage] = useState(8);
+  const [logsPerPage] = useState(5);
   const [user, setUser] = useState(null);
   const [showActivityPanel, setShowActivityPanel] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 992);
@@ -27,56 +29,106 @@ const AuditLogList = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
+  const [securityStats, setSecurityStats] = useState({
+    failedLogins: 0,
+    suspiciousActivities: 0,
+    adminActions: 0,
+    dataChanges: 0
+  });
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   
   // Refs and hooks
   const navigate = useNavigate();
   const searchRef = useRef(null);
 
-  // Date formatting functions
+  // Update current time every minute
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Date formatting functions with proper timezone handling
   const formatFullDate = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } catch (e) {
+      console.error('Date formatting error:', e);
+      return 'Invalid Date';
+    }
   };
 
   const formatDateTime = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (e) {
+      console.error('Date formatting error:', e);
+      return 'Invalid Date';
+    }
   };
 
   const formatTime = (dateString) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Manila',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (e) {
+      console.error('Time formatting error:', e);
+      return 'Invalid Time';
+    }
   };
 
   const isToday = (dateString) => {
     if (!dateString) return false;
-    const date = new Date(dateString);
-    const today = new Date();
-    return date.toDateString() === today.toDateString();
+    try {
+      const date = new Date(dateString);
+      const today = new Date();
+      return date.getFullYear() === today.getFullYear() &&
+             date.getMonth() === today.getMonth() &&
+             date.getDate() === today.getDate();
+    } catch (e) {
+      console.error('Date comparison error:', e);
+      return false;
+    }
   };
 
   const isYesterday = (dateString) => {
     if (!dateString) return false;
-    const date = new Date(dateString);
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return date.toDateString() === yesterday.toDateString();
+    try {
+      const date = new Date(dateString);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      return date.getFullYear() === yesterday.getFullYear() &&
+             date.getMonth() === yesterday.getMonth() &&
+             date.getDate() === yesterday.getDate();
+    } catch (e) {
+      console.error('Date comparison error:', e);
+      return false;
+    }
   };
 
   const formatDateForDisplay = (dateString) => {
@@ -115,6 +167,7 @@ const AuditLogList = () => {
       setUser(loggedInUser);
       fetchLogs(token);
       fetchRecentActivities(token);
+      analyzeSecurityData(token);
     }
 
     const handleClickOutside = (event) => {
@@ -156,14 +209,46 @@ const AuditLogList = () => {
 
   const fetchRecentActivities = async (token) => {
     try {
-      const mockActivities = [
-        { id: 1, type: 'login', userId: 101, userName: 'Admin User', date: new Date(Date.now() - 1000 * 60 * 5), details: 'User logged in' },
-        { id: 2, type: 'action', userId: 102, userName: 'Staff User', date: new Date(Date.now() - 1000 * 60 * 60 * 24), details: 'Updated patient records' }
-      ];
+      const response = await axios.get('http://localhost:8000/api/admin/recent-activities', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       
-      setRecentActivities(mockActivities);
+      if (response.data.success) {
+        setRecentActivities(response.data.data || []);
+      } else {
+        const mockActivities = [
+          { id: 1, type: 'login', userId: user?.id || 101, userName: user ? `${user.first_name} ${user.last_name || ''}` : 'Admin User', 
+            date: new Date(Date.now() - 1000 * 60 * 5).toISOString(), details: 'User logged in' },
+          { id: 2, type: 'action', userId: 102, userName: 'Staff User', 
+            date: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), details: 'Updated patient records' }
+        ];
+        setRecentActivities(mockActivities);
+      }
     } catch (err) {
       console.error('Error fetching activities:', err);
+    }
+  };
+
+  const analyzeSecurityData = async (token) => {
+    try {
+      const stats = {
+        failedLogins: logs.filter(log => log.action?.includes('failed login')).length,
+        suspiciousActivities: logs.filter(log => 
+          log.action?.includes('unauthorized') || 
+          log.action?.includes('suspicious')
+        ).length,
+        adminActions: logs.filter(log => log.user_type === 'admin').length,
+        dataChanges: logs.filter(log => 
+          log.action?.includes('update') || 
+          log.action?.includes('delete') ||
+          log.action?.includes('create')
+        ).length
+      };
+      setSecurityStats(stats);
+    } catch (err) {
+      console.error('Error analyzing security data:', err);
     }
   };
 
@@ -227,8 +312,16 @@ const AuditLogList = () => {
         doc.text(`Generated by: ${user.first_name} ${user.last_name || ''}`, 14, 38);
       }
 
+      doc.setFontSize(12);
+      doc.text('Security Overview', 14, 50);
+      doc.setFontSize(10);
+      doc.text(`• Failed login attempts: ${securityStats.failedLogins}`, 20, 60);
+      doc.text(`• Suspicious activities: ${securityStats.suspiciousActivities}`, 20, 70);
+      doc.text(`• Admin actions: ${securityStats.adminActions}`, 20, 80);
+      doc.text(`• Data modifications: ${securityStats.dataChanges}`, 20, 90);
+
       autoTable(doc, {
-        startY: user ? 50 : 40,
+        startY: 100,
         head: [['Log ID', 'User', 'User Type', 'Action', 'Timestamp']],
         body: filteredLogs.map(log => [
           log.audit_id || 'N/A',
@@ -274,6 +367,16 @@ const AuditLogList = () => {
   const refreshData = () => {
     const token = localStorage.getItem('token');
     fetchLogs(token);
+    analyzeSecurityData(token);
+  };
+
+  const getThreatLevel = () => {
+    const threatScore = securityStats.failedLogins * 0.5 + 
+                       securityStats.suspiciousActivities * 0.8;
+    
+    if (threatScore > 10) return 'High';
+    if (threatScore > 5) return 'Medium';
+    return 'Low';
   };
 
   // Styles
@@ -284,7 +387,7 @@ const AuditLogList = () => {
       backgroundColor: '#f5f7fa',
       position: 'relative',
       width: '110%',
-      marginTop: isMobile ? '-800' : '-920px',
+      marginTop: isMobile ? '-800' : '-690px',
     },
     content: {
       flex: 1,
@@ -399,7 +502,7 @@ const AuditLogList = () => {
     },
     summaryCards: {
       display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
+      gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)',
       gap: '15px',
       marginBottom: '20px',
     },
@@ -431,6 +534,73 @@ const AuditLogList = () => {
     },
     summaryCardIcon: {
       fontSize: '24px',
+    },
+    securityOverview: {
+      backgroundColor: 'white',
+      borderRadius: '10px',
+      padding: '20px',
+      marginBottom: '20px',
+      boxShadow: '0 4px 10px rgba(0,0,0,0.05)',
+    },
+    securityHeader: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: '15px',
+    },
+    securityTitle: {
+      color: '#395886',
+      fontSize: '18px',
+      fontWeight: '600',
+    },
+    threatLevel: {
+      display: 'flex',
+      alignItems: 'center',
+      padding: '5px 10px',
+      borderRadius: '20px',
+      fontWeight: '600',
+    },
+    threatLevelLow: {
+      backgroundColor: '#e6f7e6',
+      color: '#2e7d32',
+    },
+    threatLevelMedium: {
+      backgroundColor: '#fff8e1',
+      color: '#ff8f00',
+    },
+    threatLevelHigh: {
+      backgroundColor: '#ffebee',
+      color: '#c62828',
+    },
+    securityStats: {
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
+      gap: '15px',
+    },
+    securityStat: {
+      backgroundColor: '#f5f7fa',
+      borderRadius: '8px',
+      padding: '15px',
+      display: 'flex',
+      alignItems: 'center',
+    },
+    securityStatIcon: {
+      fontSize: '20px',
+      marginRight: '10px',
+      color: '#395886',
+    },
+    securityStatContent: {
+      flex: 1,
+    },
+    securityStatTitle: {
+      fontSize: '12px',
+      color: '#638ECB',
+      marginBottom: '5px',
+    },
+    securityStatValue: {
+      fontSize: '18px',
+      fontWeight: '600',
+      color: '#395886',
     },
     headerControls: {
       display: 'flex',
@@ -753,6 +923,14 @@ const AuditLogList = () => {
     },
   };
 
+  // Determine threat level styling
+  const threatLevelStyle = () => {
+    const level = getThreatLevel();
+    if (level === 'High') return { ...styles.threatLevel, ...styles.threatLevelHigh };
+    if (level === 'Medium') return { ...styles.threatLevel, ...styles.threatLevelMedium };
+    return { ...styles.threatLevel, ...styles.threatLevelLow };
+  };
+
   return (
     <div style={styles.container}>
       <AdminSidebar />
@@ -788,7 +966,7 @@ const AuditLogList = () => {
                 <div style={styles.logo}>
                   <img src={logoImage} alt="Clinic Logo" style={{ height: '50px' }} />
                   <h1 style={styles.heading}>
-                    System Audit Logs
+                    System Activity History
                   </h1>
                 </div>
                 <div style={styles.userInfo}>
@@ -801,20 +979,76 @@ const AuditLogList = () => {
                       />
                       <div style={styles.userDetails}>
                         <span style={styles.welcomeText}>Good Day, {user.first_name}!</span>
-                        <span style={styles.userRole}>Admin</span>
+                        <span style={styles.userRole}>Administartor</span>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
               <div style={styles.headerTitle}>
-                <p style={styles.subHeading}>Track all system activities and changes</p>
+                <p style={styles.subHeading}>Keep a comprehensive log of all actions performed within the system, including user interactions, updates, and administrative changes for auditing and monitoring purposes</p>
                 <p style={styles.datetime}>
-                  {formatFullDate(new Date())} at {formatTime(new Date())}
+                  {formatFullDate(currentTime)} at {formatTime(currentTime)}
                 </p>
               </div>
             </>
           )}
+
+          {/* Security Overview Section */}
+          <div style={styles.securityOverview}>
+            <div style={styles.securityHeader}>
+              <h3 style={styles.securityTitle}>
+                <FaShieldAlt style={{ marginRight: '10px' }} />
+                Security Overview
+              </h3>
+              <div style={threatLevelStyle()}>
+                <FaExclamationTriangle style={{ marginRight: '5px' }} />
+                Threat Level: {getThreatLevel()}
+              </div>
+            </div>
+            
+            <div style={styles.securityStats}>
+              <div style={styles.securityStat}>
+                <div style={styles.securityStatIcon}>
+                  <FaLock />
+                </div>
+                <div style={styles.securityStatContent}>
+                  <div style={styles.securityStatTitle}>Failed Logins</div>
+                  <div style={styles.securityStatValue}>{securityStats.failedLogins}</div>
+                </div>
+              </div>
+              
+              <div style={styles.securityStat}>
+                <div style={styles.securityStatIcon}>
+                  <FaExclamationTriangle />
+                </div>
+                <div style={styles.securityStatContent}>
+                  <div style={styles.securityStatTitle}>Suspicious Activities</div>
+                  <div style={styles.securityStatValue}>{securityStats.suspiciousActivities}</div>
+                </div>
+              </div>
+              
+              <div style={styles.securityStat}>
+                <div style={styles.securityStatIcon}>
+                  <FaUserShield />
+                </div>
+                <div style={styles.securityStatContent}>
+                  <div style={styles.securityStatTitle}>Admin Actions</div>
+                  <div style={styles.securityStatValue}>{securityStats.adminActions}</div>
+                </div>
+              </div>
+              
+              <div style={styles.securityStat}>
+                <div style={styles.securityStatIcon}>
+                  <FaChartLine />
+                </div>
+                <div style={styles.securityStatContent}>
+                  <div style={styles.securityStatTitle}>Data Changes</div>
+                  <div style={styles.securityStatValue}>{securityStats.dataChanges}</div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Summary Cards */}
           <div style={styles.summaryCards}>
@@ -832,11 +1066,40 @@ const AuditLogList = () => {
               <div style={styles.summaryCardContent}>
                 <h3>Today's Activities</h3>
                 <p>
+                  {logs.filter(log => isToday(log.timestamp)).length}
+                </p>
+              </div>
+              <div style={styles.summaryCardIcon}>
+                <FaChartLine />
+              </div>
+            </div>
+            
+            <div style={{ ...styles.summaryCard, ...styles.summaryCardWarning }}>
+              <div style={styles.summaryCardContent}>
+                <h3>This Week</h3>
+                <p>
                   {logs.filter(log => {
                     const logDate = new Date(log.timestamp);
                     const today = new Date();
-                    return logDate.toDateString() === today.toDateString();
+                    const lastWeek = new Date(today);
+                    lastWeek.setDate(lastWeek.getDate() - 7);
+                    return logDate >= lastWeek;
                   }).length}
+                </p>
+              </div>
+              <div style={styles.summaryCardIcon}>
+                <FaChartLine />
+              </div>
+            </div>
+            
+            <div style={{ ...styles.summaryCard, ...styles.summaryCardDanger }}>
+              <div style={styles.summaryCardContent}>
+                <h3>Critical Events</h3>
+                <p>
+                  {logs.filter(log => 
+                    log.action?.includes('failed') || 
+                    log.action?.includes('unauthorized')
+                  ).length}
                 </p>
               </div>
               <div style={styles.summaryCardIcon}>
@@ -882,18 +1145,13 @@ const AuditLogList = () => {
             <div style={styles.actionButtons}>
               <button 
                 style={{ ...styles.button, ...styles.buttonPrimary }}
-                onClick={refreshData}
-                disabled={loading}
+                onClick={() => setShowAnalyticsModal(true)}
+                disabled={logs.length === 0}
                 onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
                 onMouseLeave={e => e.currentTarget.style.transform = 'none'}
               >
-                <FaSync 
-                  style={{ 
-                    ...styles.buttonIcon,
-                    animation: loading ? 'spin 1s linear infinite' : 'none'
-                  }} 
-                />
-                {isMobile ? '' : 'Refresh'}
+                <FaChartBar style={styles.buttonIcon} />
+                {isMobile ? '' : 'Analytics'}
               </button>
 
               <button 
@@ -1105,6 +1363,15 @@ const AuditLogList = () => {
               )}
             </div>
           </div>
+        )}
+
+        {/* Analytics Modal */}
+        {showAnalyticsModal && (
+          <AnalyticsModal 
+            isOpen={showAnalyticsModal}
+            onClose={() => setShowAnalyticsModal(false)}
+            logs={logs}
+          />
         )}
       </div>
     </div>

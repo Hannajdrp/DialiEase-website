@@ -422,7 +422,7 @@ const DoctorDashboard = () => {
             <h4>API Errors:</h4>
             <ul>
               {apiErrors.map((error, index) => (
-                <li key={index}>{error}</li>
+                <li key={`api-error-${index}`}>{error}</li>
               ))}
             </ul>
           </S.ErrorContainer>
@@ -449,50 +449,6 @@ const DoctorDashboard = () => {
           <S.DoctorImage src={doctorPic} alt="Doctor illustration" />
         </S.WelcomeBanner>
 
-        {/* Key Metrics Section
-        <S.MetricsGrid>
-          <S.MetricCard>
-            <S.MetricIcon $background="#e3f2fd">
-              <FaUserInjured color="#1976d2" />
-            </S.MetricIcon>
-            <S.MetricContent>
-              <S.MetricLabel>Total Patients Today</S.MetricLabel>
-              <S.MetricValue>{dashboardData.patientsToday.length}</S.MetricValue>
-            </S.MetricContent>
-          </S.MetricCard>
-
-          <S.MetricCard>
-            <S.MetricIcon $background="#e8f5e9">
-              <FaCheckCircle color="#388e3c" />
-            </S.MetricIcon>
-            <S.MetricContent>
-              <S.MetricLabel>Completed Cases</S.MetricLabel>
-              <S.MetricValue>{stats.completed}</S.MetricValue>
-            </S.MetricContent>
-          </S.MetricCard>
-
-          <S.MetricCard>
-            <S.MetricIcon $background="#fff8e1">
-              <FaRegClock color="#ffa000" />
-            </S.MetricIcon>
-            <S.MetricContent>
-              <S.MetricLabel>In Progress</S.MetricLabel>
-              <S.MetricValue>{stats.in_progress}</S.MetricValue>
-            </S.MetricContent>
-          </S.MetricCard>
-
-          <S.MetricCard>
-            <S.MetricIcon $background="#ffebee">
-              <FaProcedures color="#d32f2f" />
-            </S.MetricIcon>
-            <S.MetricContent>
-              <S.MetricLabel>Pending Cases</S.MetricLabel>
-              <S.MetricValue>{stats.pending}</S.MetricValue>
-            </S.MetricContent>
-          </S.MetricCard>
-        </S.MetricsGrid> */}
-
-
         {/* Upcoming Schedule Overview */}
         <UpcomingScheduleOverview
           filteredTodayPatients={filteredTodayPatients}
@@ -515,125 +471,127 @@ const DoctorDashboard = () => {
       <S.Sidebar>
         {/* Next Patient Section */}
         {dashboardData.nextPatient && (
-  <S.NextPatientCard>
-    <h3>
-      <FaUserInjured style={{ color: '#477977', fontSize: '0.9rem' }} />
-      Upcoming Checkup Date
-    </h3>
+          <S.NextPatientCard>
+            <h3>
+              <FaUserInjured style={{ color: '#477977', fontSize: '0.9rem' }} />
+              Upcoming Checkup Date
+            </h3>
 
-    <S.NextPatientActions style={{ justifyContent: 'space-between', paddingTop: '0.5rem' }}>
-      <div>
-        <FaCalendarAlt />
-        {formatDate(dashboardData.nextPatient.appointment_date)}
-      </div>
-      <div>
-      </div>
-    </S.NextPatientActions>
-  </S.NextPatientCard>
-)}
+            <S.NextPatientActions style={{ justifyContent: 'space-between', paddingTop: '0.5rem' }}>
+              <div>
+                <FaCalendarAlt />
+                {formatDate(dashboardData.nextPatient.appointment_date)}
+              </div>
+              <div>
+              </div>
+            </S.NextPatientActions>
+          </S.NextPatientCard>
+        )}
 
-{/* Upcoming Appointments Section */}
-<S.AppointmentsCard>
-  <S.AppointmentsHeader>
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-      <h3>
-        <FaCalendarAlt style={{ color: '#477977', fontSize: '0.9rem' }} />
-        Scheduled Patients Overview
-      </h3>
-      <S.PatientCountBadge>
-        {filteredAppointments.filter(a => a.confirmation_status === 'confirmed').length} confirmed
-      </S.PatientCountBadge>
-    </div>
-    <S.SearchContainer>
-      <FaSearch />
-      <input
-        type="text"
-        placeholder="Search patients..."
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-      />
-    </S.SearchContainer>
-  </S.AppointmentsHeader>
-  
-  <S.AppointmentsList>
-    {filteredAppointments.length > 0 ? (
-      <S.AppointmentsTable>
-        <thead>
-          <tr>
-            <th>Patient</th>
-            <th>Date</th>
-            <th>Confirmation Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredAppointments.map((appointment, index) => {
-            const daysDifference = getDaysDifference(appointment.appointment_date);
-            const appointmentDate = new Date(appointment.appointment_date);
-            const isConfirmed = appointment.confirmation_status === 'confirmed';
+        {/* Upcoming Appointments Section */}
+        <S.AppointmentsCard>
+          <S.AppointmentsHeader>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <h3>
+                <FaCalendarAlt style={{ color: '#477977', fontSize: '0.9rem' }} />
+                Scheduled Patients Overview
+              </h3>
+              <S.PatientCountBadge>
+                {filteredAppointments.filter(a => a.confirmation_status === 'confirmed').length} confirmed
+              </S.PatientCountBadge>
+            </div>
+            <S.SearchContainer>
+              <FaSearch />
+              <input
+                type="text"
+                placeholder="Search patients..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </S.SearchContainer>
+          </S.AppointmentsHeader>
+          
+          <S.AppointmentsList>
+            {filteredAppointments.length > 0 ? (
+              <S.AppointmentsTable>
+                <thead>
+                  <tr>
+                    <th>Patient</th>
+                    <th>Date</th>
+                    <th>Confirmation Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAppointments.map((appointment, index) => {
+                    const daysDifference = getDaysDifference(appointment.appointment_date);
+                    const appointmentDate = new Date(appointment.appointment_date);
+                    const isConfirmed = appointment.confirmation_status === 'confirmed';
+                    // Create a unique key combining patientID and appointment date
+                    const uniqueKey = `appointment-${appointment.patientID}-${appointment.appointment_date}-${index}`;
 
-            return (
-              <tr 
-                key={appointment.patientID || index} 
-                onClick={() => handleViewPatientDetails(appointment)}
-                style={{ 
-                  opacity: isConfirmed ? 1 : 0.7,
-                  backgroundColor: isConfirmed ? '#f5f5f5' : 'transparent'
-                }}
-              >
-                <td>
-                  {appointment.first_name} {appointment.last_name}
-                  {!isConfirmed && <S.PendingBadge>Pending</S.PendingBadge>}
-                </td>
-                <td>
-                  {daysDifference === 0 ? (
-                    <>
-                      <S.TodayIndicator />
-                      Today
-                    </>
-                  ) : daysDifference === 1 ? (
-                    <>
-                      <S.TomorrowIndicator />
-                      Tomorrow
-                    </>
-                  ) : (
-                    appointmentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                  )}
-                </td>
-                <td>
-                  {isConfirmed ? (
-                    <S.ConfirmedBadge>
-                      <FaCheck style={{ fontSize: '0.7rem' }} />
-                      Confirmed
-                    </S.ConfirmedBadge>
-                  ) : (
-                    <S.PendingBadge>
-                      <FaClock style={{ fontSize: '0.7rem' }} />
-                      Pending
-                    </S.PendingBadge>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </S.AppointmentsTable>
-    ) : (
-      <S.EmptyAppointments>
-        <div>
-          <FaCalendarAlt />
-        </div>
-        <div>
-          {searchTerm ? 'No matching appointments' : 'No Upcoming Appointments'}
-        </div>
-        <p>
-          {searchTerm ? 
-            'No patients match your search criteria' : 
-            'There are no upcoming appointments in the next 7 days.'}
-        </p>
-      </S.EmptyAppointments>
-    )}
-  </S.AppointmentsList>
-</S.AppointmentsCard>
+                    return (
+                      <tr 
+                        key={uniqueKey}
+                        onClick={() => handleViewPatientDetails(appointment)}
+                        style={{ 
+                          opacity: isConfirmed ? 1 : 0.7,
+                          backgroundColor: isConfirmed ? '#f5f5f5' : 'transparent'
+                        }}
+                      >
+                        <td>
+                          {appointment.first_name} {appointment.last_name}
+                          {!isConfirmed && <S.PendingBadge>Pending</S.PendingBadge>}
+                        </td>
+                        <td>
+                          {daysDifference === 0 ? (
+                            <>
+                              <S.TodayIndicator />
+                              Today
+                            </>
+                          ) : daysDifference === 1 ? (
+                            <>
+                              <S.TomorrowIndicator />
+                              Tomorrow
+                            </>
+                          ) : (
+                            appointmentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          )}
+                        </td>
+                        <td>
+                          {isConfirmed ? (
+                            <S.ConfirmedBadge>
+                              <FaCheck style={{ fontSize: '0.7rem' }} />
+                              Confirmed
+                            </S.ConfirmedBadge>
+                          ) : (
+                            <S.PendingBadge>
+                              <FaClock style={{ fontSize: '0.7rem' }} />
+                              Pending
+                            </S.PendingBadge>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </S.AppointmentsTable>
+            ) : (
+              <S.EmptyAppointments>
+                <div>
+                  <FaCalendarAlt />
+                </div>
+                <div>
+                  {searchTerm ? 'No matching appointments' : 'No Upcoming Appointments'}
+                </div>
+                <p>
+                  {searchTerm ? 
+                    'No patients match your search criteria' : 
+                    'There are no upcoming appointments in the next 7 days.'}
+                </p>
+              </S.EmptyAppointments>
+            )}
+          </S.AppointmentsList>
+        </S.AppointmentsCard>
 
         {/* Schedule Overview Section */}
         <S.CalendarCard>

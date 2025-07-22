@@ -24,7 +24,6 @@ import { MdOutlineSick, MdOutlineMedicalServices } from 'react-icons/md';
 import PatientAvatar from '../../components/PatientAvatar';
 import styled from 'styled-components';
 
-// Enhanced styled components with professional medical theme
 const Container = styled.div`
   background-color: #ffffff;
   border-radius: 12px;
@@ -239,9 +238,10 @@ const UpcomingScheduleOverview = ({
   filteredNextWeekPatients,
   nextWeekSearchTerm,
   setNextWeekSearchTerm,
+  navigate,
+  handlePrescribe,
   handleViewPatientDetails
 }) => {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = React.useState('today');
   const [currentPage, setCurrentPage] = React.useState(1);
   const patientsPerPage = 4;
@@ -380,7 +380,7 @@ const UpcomingScheduleOverview = ({
     );
   };
 
-  const renderPatientCard = (patient) => {
+  const renderPatientCard = (patient, index) => {
     const tabConfig = getTabConfig();
     const patientAge = calculateAge(patient.date_of_birth);
     const genderIcon = patient.gender === 'male' ? 
@@ -389,7 +389,7 @@ const UpcomingScheduleOverview = ({
     
     return (
       <PatientCard 
-        key={`patient-${patient.id}`}
+        key={`patient-${patient.patientID || index}`}
         $borderColor={tabConfig.color}
         onClick={() => handleViewPatientDetails(patient)}
       >
@@ -560,7 +560,7 @@ const UpcomingScheduleOverview = ({
         </div>
 
         <PatientGrid>
-          {paginatedPatients.map(patient => renderPatientCard(patient))}
+          {paginatedPatients.map((patient, index) => renderPatientCard(patient, index))}
         </PatientGrid>
 
         <StatsSummary>

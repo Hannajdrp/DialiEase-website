@@ -9,28 +9,27 @@ class Prescription extends Model
 {
     use HasFactory;
 
+    protected $table = 'prescriptions'; // Explicitly defined if table name isn't default plural
+
+    protected $primaryKey = 'id'; // Only needed if different from 'id'
+
     protected $fillable = [
-        'user_id',
-        'patient_id',
+        'userID',
+        'patientID',
         'prescription_file',
-        'prescription_date',
-        'additional_instructions',
-        'medicines_data',
-        'pd_data'
     ];
 
     protected $casts = [
-        'medicines_data' => 'array',
-        'pd_data' => 'array'
+        'prescription_date' => 'datetime',
     ];
 
     public function patient()
     {
-        return $this->belongsTo(Patient::class);
+        return $this->belongsTo(Patient::class, 'patientID', 'patientID');
     }
 
     public function user()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'userID', 'userID'); // Adjusted to match your table schema
     }
 }
